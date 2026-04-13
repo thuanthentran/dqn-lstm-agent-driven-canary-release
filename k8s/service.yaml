@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: ai-agent
-        image: canary-ai-service:v1 # Tên image bạn đã build
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:aec816b
         ports:
         - containerPort: 8000
         resources:
