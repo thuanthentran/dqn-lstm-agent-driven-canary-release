@@ -23,15 +23,6 @@ spec:
           value: models/model_canary_drqn.pth
         - name: PROMETHEUS_URL
           value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
-        ports:
-        - containerPort: 8000
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
 ---
 apiVersion: v1
 kind: Service
