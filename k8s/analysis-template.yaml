@@ -9,18 +9,21 @@ spec:
   metrics:
   - name: ai-judgment
     interval: 30s # Tần suất truy vấn AI Agent
+    count: 5
     provider:
       webhook:
-        url: "http://canary-ai-agent-svc/predict"
+        url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
         method: POST
         headers:
         - key: "Content-Type"
           value: "application/json"
         jsonPayload:
-          history: [] # Cần tích hợp Prometheus client vào FastAPI để tự điền dữ liệu này [cite: 10, 48]
           app_info:
             name: "{{args.rollout-name}}"
             weight: "{{args.current-weight}}"
+            namespace: "default"
+            canary_service: "my-app-canary"
+            stable_service: "my-app-stable"
     # Thành công: Argo tiến tới bước (step) tiếp theo trong Rollout [cite: 2, 25]
     successCondition: "result.decision == 'Successful'"
     # Thất bại: Argo lập tức kích hoạt Rollback về phiên bản Stable [cite: 2, 28]
