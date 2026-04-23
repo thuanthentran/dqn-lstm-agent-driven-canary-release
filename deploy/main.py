@@ -56,14 +56,26 @@ async def predict(request: InferenceRequest):
     if len(request.history) < SEQ_LENGTH:
         # Nếu chưa đủ 10 điểm, ta "pad" thêm bằng các điểm cũ nhất
         needed = SEQ_LENGTH - len(request.history)
-        history_list = [request.history[0]] * needed + request.history
+        history_list = [request.history] * needed + request.history
     else:
         history_list = request.history[-SEQ_LENGTH:]
 
-    # Chuyển dữ liệu sang Tensor (8 features)
+    # Chuyển dữ liệu sang Tensor (8 features) và CHUẨN HÓA
     data = []
     for p in history_list:
-        data.append([p.weight, p.e_canary, p.e_stable, p.l_canary, p.l_stable, p.cpu, p.mem, p.rps])
+        # Chuẩn hóa RPS bằng cách chia cho 1000 (khớp với kịch bản train)
+        normalized_rps = p.rps / 1000.0
+        
+        data.append([
+            p.weight, 
+            p.e_canary, 
+            p.e_stable, 
+            p.l_canary, 
+            p.l_stable, 
+            p.cpu, 
+            p.mem, 
+            normalized_rps
+        ])
     
     input_tensor = torch.FloatTensor([data]).to(DEVICE) # Shape: (1, 10, 8)
 
@@ -71,9 +83,16 @@ async def predict(request: InferenceRequest):
         q_values, _ = model(input_tensor)
         action = torch.argmax(q_values).item()
 
-    # Ánh xạ action sang kết quả cho Argo Rollouts
-    # Action 4 là ROLLBACK trong code training của bạn
-    decision = "Rollback" if action == 4 else "Successful"
+    # Ánh xạ action chi tiết sang cấu hình Argo Rollouts
+    action_mapping = {
+        0: "Advance_10", # Fast Forward (+10% weight)
+        1: "Advance_5",  # Step Forward (+5% weight)
+        2: "Pause",      # Stay (Giữ nguyên để quan sát)
+        3: "StepBack",   # Step Back (-5% weight)
+        4: "Rollback"    # EMERGENCY ROLLBACK (Hủy rollout)
+    }
+    
+    decision = action_mapping.get(action, "Unknown")
     
     return {
         "action_id": action,
