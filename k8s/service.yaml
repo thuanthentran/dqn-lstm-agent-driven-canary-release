@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: canary-ai-agent
+  namespace: default
   labels:
     app: canary-ai-agent
 spec:
@@ -17,6 +18,11 @@ spec:
       containers:
       - name: ai-agent
         image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:latest
+        env:
+        - name: MODEL_PATH
+          value: models/model_canary_drqn.pth
+        - name: PROMETHEUS_URL
+          value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
         ports:
         - containerPort: 8000
         resources:
@@ -31,6 +37,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: canary-ai-agent-svc
+  namespace: default
 spec:
   selector:
     app: canary-ai-agent
