@@ -1,9 +1,12 @@
+import os
+import time
+from typing import List
+
+import httpx
 import torch
-import numpy as np
+import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
-import torch.nn as nn
 
 # --- 1. KIẾN TRÚC MÔ HÌNH (DRQN) ---
 class DRQN(nn.Module):
@@ -21,58 +24,191 @@ class DRQN(nn.Module):
         return x, hidden
 
 # --- 2. CẤU HÌNH HỆ THỐNG ---
-MODEL_PATH = "model_canary_drqn.pth"
-SEQ_LENGTH = 10 
-DEVICE = torch.device("cpu") 
+MODEL_PATH = os.getenv("MODEL_PATH", "models/model_canary_drqn.pth")
+SEQ_LENGTH = 10
+DEVICE = torch.device("cpu")
+PROMETHEUS_URL = os.getenv(
+    "PROMETHEUS_URL",
+    "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
+)
+PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "30s")
+PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
 
 app = FastAPI(title="Canary AI Agent Service")
 
 # Load model đã huấn luyện
 model = DRQN(n_obs=8, n_actions=5).to(DEVICE)
+MODEL_READY = False
 try:
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.eval()
+    MODEL_READY = True
     print(f"Successfully loaded model from {MODEL_PATH}")
 except Exception as e:
     print(f"Error loading model: {e}")
 
 # --- 3. ĐỊNH NGHĨA DỮ LIỆU ---
-class MetricPoint(BaseModel):
+class AppInfo(BaseModel):
+    name: str
     weight: float
-    e_canary: float
-    e_stable: float
-    l_canary: float
-    l_stable: float
-    cpu: float
-    mem: float
-    rps: float
+    namespace: str = "default"
+    canary_service: str = "my-app-canary"
+    stable_service: str = "my-app-stable"
 
 class InferenceRequest(BaseModel):
-    history: List[MetricPoint]
+    app_info: AppInfo
+
+
+def _prom_query_range(query: str, start_ts: int, end_ts: int, step: str) -> List[float]:
+    params = {
+        "query": query,
+        "start": start_ts,
+        "end": end_ts,
+        "step": step,
+    }
+    with httpx.Client(timeout=8.0) as client:
+        response = client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
+        response.raise_for_status()
+        payload = response.json()
+
+    if payload.get("status") != "success":
+        return []
+
+    result = payload.get("data", {}).get("result", [])
+    if not result:
+        return []
+
+    # Query mong đợi trả về đúng 1 series tổng hợp.
+    points = result[0].get("values", [])
+    series = []
+    for _, value in points:
+        try:
+            series.append(float(value))
+        except (TypeError, ValueError):
+            series.append(0.0)
+    return series
+
+
+def _normalize_series(values: List[float], length: int, default: float = 0.0) -> List[float]:
+    if not values:
+        return [default] * length
+    if len(values) >= length:
+        return values[-length:]
+    pad = [values[0]] * (length - len(values))
+    return pad + values
+
+
+def _build_history_from_prometheus(app_info: AppInfo) -> List[List[float]]:
+    end_ts = int(time.time())
+    start_ts = end_ts - PROM_QUERY_WINDOW_SECONDS
+
+    ns = app_info.namespace
+    canary_svc = app_info.canary_service
+    stable_svc = app_info.stable_service
+
+    e_canary = _prom_query_range(
+        (
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\",status=~\"5..\"}}[1m]))"
+            f" / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m])), 0.001)"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    e_stable = _prom_query_range(
+        (
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\",status=~\"5..\"}}[1m]))"
+            f" / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m])), 0.001)"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    l_canary = _prom_query_range(
+        (
+            "histogram_quantile(0.95, "
+            f"sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m]))"
+            ")"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    l_stable = _prom_query_range(
+        (
+            "histogram_quantile(0.95, "
+            f"sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m]))"
+            ")"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    cpu = _prom_query_range(
+        (
+            "avg(rate(container_cpu_usage_seconds_total{"
+            f"namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\""
+            "}[1m]))"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    mem = _prom_query_range(
+        (
+            "avg(container_memory_working_set_bytes{"
+            f"namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\""
+            "}) / 1048576"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+    rps = _prom_query_range(
+        (
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=~\"{canary_svc}|{stable_svc}\"}}[1m]))"
+        ),
+        start_ts,
+        end_ts,
+        PROM_QUERY_STEP,
+    )
+
+    e_canary = _normalize_series(e_canary, SEQ_LENGTH)
+    e_stable = _normalize_series(e_stable, SEQ_LENGTH)
+    l_canary = _normalize_series(l_canary, SEQ_LENGTH)
+    l_stable = _normalize_series(l_stable, SEQ_LENGTH)
+    cpu = _normalize_series(cpu, SEQ_LENGTH)
+    mem = _normalize_series(mem, SEQ_LENGTH)
+    rps = _normalize_series(rps, SEQ_LENGTH)
+
+    history = []
+    for i in range(SEQ_LENGTH):
+        history.append(
+            [
+                float(app_info.weight),
+                e_canary[i],
+                e_stable[i],
+                l_canary[i],
+                l_stable[i],
+                cpu[i],
+                mem[i],
+                rps[i] / 1000.0,
+            ]
+        )
+    return history
 
 # --- 4. ENDPOINT DỰ ĐOÁN (ĐÃ TINH CHỈNH MAPPING) ---
 @app.post("/predict")
 async def predict(request: InferenceRequest):
-    # Kỹ thuật Padding để đảm bảo đủ Sequence Length 10 [cite: 37, 44, 92]
-    if len(request.history) < SEQ_LENGTH:
-        needed = SEQ_LENGTH - len(request.history)
-        history_list = [request.history[0]] * needed + request.history
-    else:
-        history_list = request.history[-SEQ_LENGTH:]
+    if not MODEL_READY:
+        raise HTTPException(status_code=503, detail="Model is not ready")
 
-    # Chuẩn hóa dữ liệu tương đồng với file train [cite: 30, 38, 51, 90]
-    data = []
-    for p in history_list:
-        data.append([
-            p.weight, 
-            p.e_canary, 
-            p.e_stable, 
-            p.l_canary, 
-            p.l_stable, 
-            p.cpu, 
-            p.mem, 
-            p.rps / 1000.0 # Chuẩn hóa RPS y hệt lúc train [cite: 38, 90]
-        ])
+    try:
+        data = _build_history_from_prometheus(request.app_info)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Cannot query Prometheus: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
     
     input_tensor = torch.FloatTensor([data]).to(DEVICE)
 
