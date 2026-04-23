@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: ai-agent
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:latest
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:0bbfb77
         ports:
         - containerPort: 8000
         resources:
