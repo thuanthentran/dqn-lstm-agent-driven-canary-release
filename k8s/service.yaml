@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: ai-agent
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:00e54de
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:283f14b
         env:
         - name: MODEL_PATH
           value: models/model_canary_drqn.pth
