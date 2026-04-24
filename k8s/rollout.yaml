@@ -29,6 +29,8 @@ spec:
   
   strategy:
     canary:
+      maxSurge: 1
+      maxUnavailable: 0
       # --- ĐIỂM CẬP NHẬT QUAN TRỌNG: TRAFFIC ROUTING ---
       canaryService: my-app-canary # Service trỏ tới bản mới
       stableService: my-app-stable # Service trỏ tới bản cũ
@@ -50,6 +52,8 @@ spec:
       
       # Lộ trình tăng traffic
       steps:
+      - setCanaryScale:
+          replicas: 1
       - setWeight: 10
       - pause: {duration: 1m} # Chờ AI Agent phân tích
       - setWeight: 30
