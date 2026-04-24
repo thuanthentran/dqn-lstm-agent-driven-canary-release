@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: my-app
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:6278a4d
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:d0f28bb
         env:
         - name: APP_SCENARIO
           value: "latency_leak"
