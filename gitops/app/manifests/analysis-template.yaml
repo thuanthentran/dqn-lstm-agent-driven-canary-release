@@ -11,11 +11,13 @@ spec:
   - name: ai-judgment
     interval: 30s # Tần suất truy vấn AI Agent
     count: 5
+    initialDelay: 20s
+    consecutiveErrorLimit: 10
     provider:
       web:
         url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
         method: POST
-        timeoutSeconds: 60
+        timeoutSeconds: 120
         headers:
         - key: "Content-Type"
           value: "application/json"

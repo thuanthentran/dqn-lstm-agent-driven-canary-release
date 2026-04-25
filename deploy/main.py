@@ -33,6 +33,7 @@ PROMETHEUS_URL = os.getenv(
 )
 PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "30s")
 PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
+PROM_QUERY_TIMEOUT_SECONDS = float(os.getenv("PROM_QUERY_TIMEOUT_SECONDS", "5"))
 
 app = FastAPI(title="Canary AI Agent Service")
 
@@ -66,10 +67,14 @@ def _prom_query_range(query: str, start_ts: int, end_ts: int, step: str) -> List
         "end": end_ts,
         "step": step,
     }
-    with httpx.Client(timeout=8.0) as client:
-        response = client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
-        response.raise_for_status()
-        payload = response.json()
+    try:
+        with httpx.Client(timeout=PROM_QUERY_TIMEOUT_SECONDS) as client:
+            response = client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPError:
+        # Trả về rỗng để agent vẫn phản hồi /predict, tránh làm AnalysisRun lỗi sớm.
+        return []
 
     if payload.get("status") != "success":
         return []
