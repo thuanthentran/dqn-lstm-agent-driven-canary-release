@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: my-app-release
+  namespace: default
+spec:
+  replicas: 5
+  # Số lượng pod cũ cần giữ lại khi rollout (thường để 25% hoặc 0 tùy chiến lược)
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      # Xóa images cũ khi pod terminate
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: my-app
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:aa9f7ad
+        imagePullPolicy: IfNotPresent  # Tránh pull images đã có
+        env:
+        - name: APP_SCENARIO
+          value: "healthy"
+        - name: APP_VERSION
+          value: "v2.0.0"
+        ports:
+        - name: http
+          containerPort: 8080
+  
+  strategy:
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      # --- ĐIỂM CẬP NHẬT QUAN TRỌNG: TRAFFIC ROUTING ---
+      canaryService: my-app-canary # Service trỏ tới bản mới
+      stableService: my-app-stable # Service trỏ tới bản cũ
+      trafficRouting:
+        nginx:
+          stableIngress: my-app-ingress # Ingress gốc của ứng dụng
+      
+      # Analysis chạy song song để AI chấm điểm
+      analysis:
+        templates:
+        - templateName: ai-dqn-decision
+        args:
+        - name: rollout-name
+          value: "my-app-v2"
+        - name: current-weight
+          valueFrom:
+            fieldRef:
+              fieldPath: status.canary.weight
+      
+      # Lộ trình tăng traffic
+      steps:
+      - setCanaryScale:
+          replicas: 1
+      - setWeight: 10
+      - pause: {duration: 1m} # Chờ AI Agent phân tích
+      - setWeight: 30
+      - pause: {duration: 2m}
+      - setWeight: 60
+      - pause: {duration: 2m}
+      - setWeight: 100
