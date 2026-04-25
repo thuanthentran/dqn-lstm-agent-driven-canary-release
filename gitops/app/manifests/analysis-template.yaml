@@ -12,13 +12,13 @@ spec:
     interval: 30s # Tần suất truy vấn AI Agent
     count: 5
     provider:
-      webhook:
+      web:
         url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
         method: POST
         headers:
         - key: "Content-Type"
           value: "application/json"
-        jsonPayload:
+        jsonBody:
           app_info:
             name: "{{args.rollout-name}}"
             weight: "{{args.current-weight}}"
