@@ -41,9 +41,6 @@ spec:
       trafficRouting:
         nginx:
           stableIngress: my-app-ingress # Ingress gốc của ứng dụng
-          canaryByHeader:
-            name: "X-Canary-Request"
-            value: "always"
       
       # Analysis chạy song song để AI chấm điểm
       analysis:
@@ -55,7 +52,7 @@ spec:
         - name: current-weight
           valueFrom:
             fieldRef:
-              fieldPath: status.canary.weight
+              fieldPath: status.canary.weights.canary.weight
       
       # Lộ trình tăng traffic
       steps:

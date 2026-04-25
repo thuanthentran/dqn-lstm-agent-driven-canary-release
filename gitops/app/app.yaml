@@ -14,6 +14,28 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: default
+  ignoreDifferences:
+  - group: ""
+    kind: Service
+    name: my-app-stable
+    namespace: default
+    jsonPointers:
+    - /spec/selector
+  - group: ""
+    kind: Service
+    name: my-app-canary
+    namespace: default
+    jsonPointers:
+    - /spec/selector
+  - group: networking.k8s.io
+    kind: Ingress
+    name: my-app-ingress
+    namespace: default
+    jsonPointers:
+    - /metadata/annotations/nginx.ingress.kubernetes.io~1canary
+    - /metadata/annotations/nginx.ingress.kubernetes.io~1canary-weight
+    - /metadata/annotations/nginx.ingress.kubernetes.io~1canary-by-header
+    - /metadata/annotations/nginx.ingress.kubernetes.io~1canary-by-header-value
   syncPolicy:
     automated:
       prune: true
