@@ -1,6 +1,7 @@
 import os
 import time
 from typing import List
+import logging
 
 import httpx
 import torch
@@ -36,6 +37,12 @@ PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
 PROM_QUERY_TIMEOUT_SECONDS = float(os.getenv("PROM_QUERY_TIMEOUT_SECONDS", "5"))
 
 app = FastAPI(title="Canary AI Agent Service")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger("canary-ai-agent")
 
 # Load model đã huấn luyện
 model = DRQN(n_obs=8, n_actions=5).to(DEVICE)
@@ -202,10 +209,28 @@ def _build_history_from_prometheus(app_info: AppInfo) -> List[List[float]]:
         )
     return history
 
+
+def _action_to_traffic_signal(action: int, current_weight: float):
+    # Heuristic signal for logs only; Argo still controls actual setWeight steps.
+    if action == 0:
+        return "increase-fast", min(100.0, current_weight + 10.0)
+    if action == 1:
+        return "increase-slow", min(100.0, current_weight + 5.0)
+    if action == 2:
+        return "hold", current_weight
+    if action == 3:
+        return "decrease", max(0.0, current_weight - 5.0)
+    if action == 4:
+        return "rollback", 0.0
+    return "hold", current_weight
+
 # --- 4. ENDPOINT DỰ ĐOÁN (ĐÃ TINH CHỈNH MAPPING) ---
 @app.post("/predict")
 async def predict(request: InferenceRequest):
+    started_at = time.perf_counter()
+
     if not MODEL_READY:
+        logger.warning("predict model_not_ready")
         raise HTTPException(status_code=503, detail="Model is not ready")
 
     try:
@@ -234,11 +259,35 @@ async def predict(request: InferenceRequest):
     }
     
     decision = action_mapping.get(action, "Running")
+    confidence = float(torch.softmax(q_values, dim=1).max())
+
+    current_weight = float(request.app_info.weight)
+    traffic_signal, suggested_weight = _action_to_traffic_signal(action, current_weight)
+    latency_ms = (time.perf_counter() - started_at) * 1000.0
+
+    logger.info(
+        (
+            "predict app=%s ns=%s current_weight=%.2f action=%d "
+            "signal=%s suggested_weight=%.2f decision=%s confidence=%.4f latency_ms=%.1f"
+        ),
+        request.app_info.name,
+        request.app_info.namespace,
+        current_weight,
+        action,
+        traffic_signal,
+        suggested_weight,
+        decision,
+        confidence,
+        latency_ms,
+    )
     
     return {
         "action_id": action,
         "decision": decision,
-        "confidence": float(torch.softmax(q_values, dim=1).max())
+        "confidence": confidence,
+        "traffic_signal": traffic_signal,
+        "suggested_weight": suggested_weight,
+        "latency_ms": latency_ms,
     }
 
 @app.get("/health")
