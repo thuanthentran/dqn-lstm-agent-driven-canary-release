@@ -32,6 +32,7 @@ spec:
   
   strategy:
     canary:
+      dynamicStableScale: true
       maxSurge: 1
       maxUnavailable: 0
       # --- ĐIỂM CẬP NHẬT QUAN TRỌNG: TRAFFIC ROUTING ---
@@ -40,6 +41,9 @@ spec:
       trafficRouting:
         nginx:
           stableIngress: my-app-ingress # Ingress gốc của ứng dụng
+          canaryByHeader:
+            name: "X-Canary-Request"
+            value: "always"
       
       # Analysis chạy song song để AI chấm điểm
       analysis:
@@ -55,8 +59,6 @@ spec:
       
       # Lộ trình tăng traffic
       steps:
-      - setCanaryScale:
-          replicas: 1
       - setWeight: 10
       - pause: {duration: 1m} # Chờ AI Agent phân tích
       - setWeight: 30
