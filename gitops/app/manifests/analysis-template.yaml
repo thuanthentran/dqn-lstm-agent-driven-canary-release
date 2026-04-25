@@ -2,6 +2,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
   name: ai-dqn-decision
+  namespace: default
 spec:
   args:
   - name: rollout-name
