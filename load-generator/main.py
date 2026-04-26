@@ -16,6 +16,8 @@ REQUEST_INTERVAL_SECONDS = float(os.getenv("REQUEST_INTERVAL_SECONDS", "0.5"))
 REPORT_EVERY_BATCHES = int(os.getenv("REPORT_EVERY_BATCHES", "5"))
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", "5"))
 HOST_HEADER = os.getenv("HOST_HEADER", "")
+if not HOST_HEADER:
+    HOST_HEADER = "my-app.local"
 
 stats = Counter()
 

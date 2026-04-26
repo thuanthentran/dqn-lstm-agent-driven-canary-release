@@ -40,7 +40,8 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  - http:
+  - host: my-app.local
+    http:
       paths:
       - path: /
         pathType: Prefix
