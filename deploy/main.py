@@ -1,6 +1,5 @@
 import os
 import time
-from functools import lru_cache
 from typing import List
 import logging
 
@@ -36,13 +35,6 @@ PROMETHEUS_URL = os.getenv(
 PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "30s")
 PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
 PROM_QUERY_TIMEOUT_SECONDS = float(os.getenv("PROM_QUERY_TIMEOUT_SECONDS", "5"))
-K8S_API_HOST = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
-K8S_API_PORT = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")
-K8S_API_URL = os.getenv("K8S_API_URL", f"https://{K8S_API_HOST}:{K8S_API_PORT}")
-K8S_API_TIMEOUT_SECONDS = float(os.getenv("K8S_API_TIMEOUT_SECONDS", "5"))
-K8S_SERVICEACCOUNT_TOKEN_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-K8S_SERVICEACCOUNT_CA_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-MIN_PROM_SERIES_POINTS = int(os.getenv("MIN_PROM_SERIES_POINTS", "1"))
 
 app = FastAPI(title="Canary AI Agent Service")
 
@@ -68,7 +60,6 @@ class AppInfo(BaseModel):
     name: str
     weight: float
     namespace: str = "default"
-    rollout_name: str = "my-app-release"
     canary_service: str = "my-app-canary"
     stable_service: str = "my-app-stable"
 
@@ -119,72 +110,7 @@ def _normalize_series(values: List[float], length: int, default: float = 0.0) ->
     return pad + values
 
 
-def _normalize_weight(weight: float) -> float:
-    if weight > 1.0:
-        weight = weight / 100.0
-    return max(0.0, min(1.0, weight))
-
-
-@lru_cache(maxsize=1)
-def _k8s_verify_setting():
-    return K8S_SERVICEACCOUNT_CA_PATH if os.path.exists(K8S_SERVICEACCOUNT_CA_PATH) else False
-
-
-@lru_cache(maxsize=1)
-def _k8s_headers():
-    headers = {}
-    if os.path.exists(K8S_SERVICEACCOUNT_TOKEN_PATH):
-        with open(K8S_SERVICEACCOUNT_TOKEN_PATH, "r", encoding="utf-8") as token_file:
-            token = token_file.read().strip()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def _query_rollout_current_weight(app_info: AppInfo) -> float:
-    rollout_name = app_info.rollout_name or app_info.name
-    url = (
-        f"{K8S_API_URL}/apis/argoproj.io/v1alpha1/"
-        f"namespaces/{app_info.namespace}/rollouts/{rollout_name}"
-    )
-    try:
-        with httpx.Client(
-            timeout=K8S_API_TIMEOUT_SECONDS,
-            verify=_k8s_verify_setting(),
-            headers=_k8s_headers(),
-        ) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            payload = response.json()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Cannot query Rollout status: {exc}")
-
-    status = payload.get("status", {}) if isinstance(payload, dict) else {}
-    canary_status = status.get("canary", {}) if isinstance(status, dict) else {}
-
-    for candidate in [canary_status.get("currentWeight"), status.get("currentWeight")]:
-        if candidate is None:
-            continue
-        try:
-            return _normalize_weight(float(candidate))
-        except (TypeError, ValueError):
-            continue
-
-    raise HTTPException(
-        status_code=503,
-        detail=f"Rollout status for {rollout_name} does not expose current weight",
-    )
-
-
-def _collect_metric_snapshot(values: List[float]) -> dict:
-    normalized = _normalize_series(values, SEQ_LENGTH)
-    return {
-        "count": len(values),
-        "series": normalized,
-    }
-
-
-def _build_history_from_prometheus(app_info: AppInfo, current_weight: float):
+def _build_history_from_prometheus(app_info: AppInfo) -> List[List[float]]:
     end_ts = int(time.time())
     start_ts = end_ts - PROM_QUERY_WINDOW_SECONDS
 
@@ -259,51 +185,29 @@ def _build_history_from_prometheus(app_info: AppInfo, current_weight: float):
         PROM_QUERY_STEP,
     )
 
-    e_canary_snapshot = _collect_metric_snapshot(e_canary)
-    e_stable_snapshot = _collect_metric_snapshot(e_stable)
-    l_canary_snapshot = _collect_metric_snapshot(l_canary)
-    l_stable_snapshot = _collect_metric_snapshot(l_stable)
-    cpu_snapshot = _collect_metric_snapshot(cpu)
-    mem_snapshot = _collect_metric_snapshot(mem)
-    rps_snapshot = _collect_metric_snapshot(rps)
-
-    weight = _normalize_weight(current_weight)
+    e_canary = _normalize_series(e_canary, SEQ_LENGTH)
+    e_stable = _normalize_series(e_stable, SEQ_LENGTH)
+    l_canary = _normalize_series(l_canary, SEQ_LENGTH)
+    l_stable = _normalize_series(l_stable, SEQ_LENGTH)
+    cpu = _normalize_series(cpu, SEQ_LENGTH)
+    mem = _normalize_series(mem, SEQ_LENGTH)
+    rps = _normalize_series(rps, SEQ_LENGTH)
 
     history = []
     for i in range(SEQ_LENGTH):
         history.append(
             [
-                weight,
-                e_canary_snapshot["series"][i],
-                e_stable_snapshot["series"][i],
-                l_canary_snapshot["series"][i],
-                l_stable_snapshot["series"][i],
-                cpu_snapshot["series"][i],
-                mem_snapshot["series"][i] / 1024.0,
-                rps_snapshot["series"][i] / 1000.0,
+                float(app_info.weight),
+                e_canary[i],
+                e_stable[i],
+                l_canary[i],
+                l_stable[i],
+                cpu[i],
+                mem[i],
+                rps[i] / 1000.0,
             ]
         )
-    return history, {
-        "e_canary": e_canary_snapshot,
-        "e_stable": e_stable_snapshot,
-        "l_canary": l_canary_snapshot,
-        "l_stable": l_stable_snapshot,
-        "cpu": cpu_snapshot,
-        "mem": mem_snapshot,
-        "rps": rps_snapshot,
-    }
-
-
-def _has_enough_prometheus_data(metric_snapshot: dict) -> bool:
-    metric_names = ["e_canary", "e_stable", "l_canary", "l_stable", "cpu", "mem", "rps"]
-    if any(metric_snapshot[name]["count"] < MIN_PROM_SERIES_POINTS for name in metric_names):
-        return False
-
-    observed_values = []
-    for name in metric_names:
-        observed_values.extend(metric_snapshot[name]["series"])
-
-    return any(abs(value) > 1e-9 for value in observed_values)
+    return history
 
 
 def _action_to_traffic_signal(action: int, current_weight: float):
@@ -330,62 +234,11 @@ async def predict(request: InferenceRequest):
         raise HTTPException(status_code=503, detail="Model is not ready")
 
     try:
-        current_weight = _query_rollout_current_weight(request.app_info)
-    except HTTPException as exc:
-        logger.warning(
-            "predict rollout=%s app=%s ns=%s rollout_weight_unavailable detail=%s",
-            request.app_info.rollout_name,
-            request.app_info.name,
-            request.app_info.namespace,
-            exc.detail,
-        )
-        return {
-            "action_id": -1,
-            "decision": "Running",
-            "confidence": 0.0,
-            "traffic_signal": "hold",
-            "suggested_weight": _normalize_weight(request.app_info.weight),
-            "latency_ms": (time.perf_counter() - started_at) * 1000.0,
-            "reason": "rollout_weight_unavailable",
-        }
-
-    try:
-        data, metric_snapshot = _build_history_from_prometheus(request.app_info, current_weight)
+        data = _build_history_from_prometheus(request.app_info)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Cannot query Prometheus: {exc}")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
-
-    if not _has_enough_prometheus_data(metric_snapshot):
-        logger.warning(
-            (
-                "predict rollout=%s app=%s ns=%s current_weight=%.2f insufficient_prometheus_data "
-                "counts=%s last_features=%s"
-            ),
-            request.app_info.rollout_name,
-            request.app_info.name,
-            request.app_info.namespace,
-            current_weight,
-            {
-                "e_canary": metric_snapshot["e_canary"]["count"],
-                "e_stable": metric_snapshot["e_stable"]["count"],
-                "l_canary": metric_snapshot["l_canary"]["count"],
-                "l_stable": metric_snapshot["l_stable"]["count"],
-                "cpu": metric_snapshot["cpu"]["count"],
-                "mem": metric_snapshot["mem"]["count"],
-                "rps": metric_snapshot["rps"]["count"],
-            },
-            data[-1],
-        )
-        return {
-            "action_id": -1,
-            "decision": "Running",
-            "confidence": 0.0,
-            "traffic_signal": "hold",
-            "suggested_weight": current_weight,
-            "latency_ms": (time.perf_counter() - started_at) * 1000.0,
-            "reason": "insufficient_prometheus_data",
-        }
     
     input_tensor = torch.FloatTensor([data]).to(DEVICE)
 
@@ -408,15 +261,15 @@ async def predict(request: InferenceRequest):
     decision = action_mapping.get(action, "Running")
     confidence = float(torch.softmax(q_values, dim=1).max())
 
+    current_weight = float(request.app_info.weight)
     traffic_signal, suggested_weight = _action_to_traffic_signal(action, current_weight)
     latency_ms = (time.perf_counter() - started_at) * 1000.0
 
     logger.info(
         (
-            "predict rollout=%s app=%s ns=%s current_weight=%.2f action=%d signal=%s "
-            "suggested_weight=%.2f decision=%s confidence=%.4f latency_ms=%.1f counts=%s last_features=%s"
+            "predict app=%s ns=%s current_weight=%.2f action=%d "
+            "signal=%s suggested_weight=%.2f decision=%s confidence=%.4f latency_ms=%.1f"
         ),
-        request.app_info.rollout_name,
         request.app_info.name,
         request.app_info.namespace,
         current_weight,
@@ -426,16 +279,6 @@ async def predict(request: InferenceRequest):
         decision,
         confidence,
         latency_ms,
-        {
-            "e_canary": metric_snapshot["e_canary"]["count"],
-            "e_stable": metric_snapshot["e_stable"]["count"],
-            "l_canary": metric_snapshot["l_canary"]["count"],
-            "l_stable": metric_snapshot["l_stable"]["count"],
-            "cpu": metric_snapshot["cpu"]["count"],
-            "mem": metric_snapshot["mem"]["count"],
-            "rps": metric_snapshot["rps"]["count"],
-        },
-        data[-1],
     )
     
     return {
@@ -445,7 +288,6 @@ async def predict(request: InferenceRequest):
         "traffic_signal": traffic_signal,
         "suggested_weight": suggested_weight,
         "latency_ms": latency_ms,
-        "rollout_weight": current_weight,
     }
 
 @app.get("/health")

@@ -19,13 +19,13 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: my-app
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:aa9f7ad
         imagePullPolicy: IfNotPresent  # Tránh pull images đã có
         env:
         - name: APP_SCENARIO
-          value: "healthy"
+          value: "error_bomb"
         - name: APP_VERSION
-          value: "v1"
+          value: "v3.0.0"
         ports:
         - name: http
           containerPort: 8080
@@ -48,11 +48,11 @@ spec:
         - templateName: ai-dqn-decision
         args:
         - name: rollout-name
-          value: "my-app-release"
+          value: "my-app-v2"
         - name: current-weight
           valueFrom:
             fieldRef:
-              fieldPath: status.currentWeight
+              fieldPath: status.canary.weights.canary.weight
       
       # Lộ trình tăng traffic
       steps:

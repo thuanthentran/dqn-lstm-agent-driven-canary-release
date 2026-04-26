@@ -26,7 +26,6 @@ spec:
             name: "{{args.rollout-name}}"
             weight: "{{args.current-weight}}"
             namespace: "default"
-            rollout_name: "{{args.rollout-name}}"
             canary_service: "my-app-canary"
             stable_service: "my-app-stable"
     # Thành công: Argo tiến tới bước (step) tiếp theo trong Rollout [cite: 2, 25]
