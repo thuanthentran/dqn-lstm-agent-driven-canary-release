@@ -48,11 +48,11 @@ spec:
         - templateName: ai-dqn-decision
         args:
         - name: rollout-name
-          value: "my-app-v2"
+          value: "my-app-release"
         - name: current-weight
           valueFrom:
             fieldRef:
-              fieldPath: status.canary.weights.canary.weight
+              fieldPath: status.currentWeight
       
       # Lộ trình tăng traffic
       steps:

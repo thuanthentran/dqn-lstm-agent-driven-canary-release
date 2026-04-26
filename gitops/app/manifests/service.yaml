@@ -15,6 +15,7 @@ spec:
       labels:
         app: canary-ai-agent
     spec:
+      serviceAccountName: canary-ai-agent
       containers:
       - name: ai-agent
         image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:latest
