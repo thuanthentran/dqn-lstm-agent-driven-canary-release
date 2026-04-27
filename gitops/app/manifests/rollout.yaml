@@ -19,13 +19,12 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
       - name: my-app
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:aa9f7ad
-        imagePullPolicy: IfNotPresent  # Tránh pull images đã có
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
         env:
         - name: APP_SCENARIO
-          value: "error_bomb"
+          value: "healthy"
         - name: APP_VERSION
-          value: "v3.0.0"
+          value: "v1"
         ports:
         - name: http
           containerPort: 8080
