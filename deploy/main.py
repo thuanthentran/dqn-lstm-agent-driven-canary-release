@@ -44,6 +44,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("canary-ai-agent")
 
+logger.info(
+    "service_boot config model_path=%s prom_url=%s step=%s window_seconds=%d timeout_seconds=%.1f seq_length=%d device=%s",
+    MODEL_PATH,
+    PROMETHEUS_URL,
+    PROM_QUERY_STEP,
+    PROM_QUERY_WINDOW_SECONDS,
+    PROM_QUERY_TIMEOUT_SECONDS,
+    SEQ_LENGTH,
+    DEVICE,
+)
+
 # Load model đã huấn luyện
 model = DRQN(n_obs=8, n_actions=5).to(DEVICE)
 MODEL_READY = False
@@ -51,9 +62,9 @@ try:
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.eval()
     MODEL_READY = True
-    print(f"Successfully loaded model from {MODEL_PATH}")
+    logger.info("model_load_success path=%s", MODEL_PATH)
 except Exception as e:
-    print(f"Error loading model: {e}")
+    logger.exception("model_load_failed path=%s error=%s", MODEL_PATH, e)
 
 # --- 3. ĐỊNH NGHĨA DỮ LIỆU ---
 class AppInfo(BaseModel):
@@ -74,20 +85,39 @@ def _prom_query_range(query: str, start_ts: int, end_ts: int, step: str) -> List
         "end": end_ts,
         "step": step,
     }
+    logger.info(
+        "prom_query_start start_ts=%d end_ts=%d step=%s query=%s",
+        start_ts,
+        end_ts,
+        step,
+        query,
+    )
+    query_started_at = time.perf_counter()
     try:
         with httpx.Client(timeout=PROM_QUERY_TIMEOUT_SECONDS) as client:
             response = client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
             response.raise_for_status()
             payload = response.json()
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
         # Trả về rỗng để agent vẫn phản hồi /predict, tránh làm AnalysisRun lỗi sớm.
+        logger.warning(
+            "prom_query_http_error query=%s error=%s",
+            query,
+            exc,
+        )
         return []
 
     if payload.get("status") != "success":
+        logger.warning(
+            "prom_query_bad_status query=%s status=%s",
+            query,
+            payload.get("status"),
+        )
         return []
 
     result = payload.get("data", {}).get("result", [])
     if not result:
+        logger.warning("prom_query_empty_result query=%s", query)
         return []
 
     # Query mong đợi trả về đúng 1 series tổng hợp.
@@ -98,19 +128,43 @@ def _prom_query_range(query: str, start_ts: int, end_ts: int, step: str) -> List
             series.append(float(value))
         except (TypeError, ValueError):
             series.append(0.0)
+
+    logger.info(
+        "prom_query_success points=%d duration_ms=%.1f query=%s",
+        len(series),
+        (time.perf_counter() - query_started_at) * 1000.0,
+        query,
+    )
     return series
 
 
 def _normalize_series(values: List[float], length: int, default: float = 0.0) -> List[float]:
     if not values:
+        logger.warning(
+            "normalize_series_empty default_applied length=%d default=%.3f",
+            length,
+            default,
+        )
         return [default] * length
     if len(values) >= length:
+        logger.info(
+            "normalize_series_trim original_len=%d target_len=%d",
+            len(values),
+            length,
+        )
         return values[-length:]
     pad = [values[0]] * (length - len(values))
+    logger.info(
+        "normalize_series_pad original_len=%d target_len=%d pad_count=%d",
+        len(values),
+        length,
+        len(pad),
+    )
     return pad + values
 
 
 def _build_history_from_prometheus(app_info: AppInfo) -> List[List[float]]:
+    build_started_at = time.perf_counter()
     end_ts = int(time.time())
     start_ts = end_ts - PROM_QUERY_WINDOW_SECONDS
 
@@ -207,6 +261,22 @@ def _build_history_from_prometheus(app_info: AppInfo) -> List[List[float]]:
                 rps[i] / 1000.0,
             ]
         )
+
+    logger.info(
+        "history_build_success app=%s ns=%s samples=%d duration_ms=%.1f latest_snapshot={weight:%.2f,e_canary:%.4f,e_stable:%.4f,l_canary:%.4f,l_stable:%.4f,cpu:%.4f,mem:%.2f,rps_k:%.4f}",
+        app_info.name,
+        app_info.namespace,
+        len(history),
+        (time.perf_counter() - build_started_at) * 1000.0,
+        history[-1][0],
+        history[-1][1],
+        history[-1][2],
+        history[-1][3],
+        history[-1][4],
+        history[-1][5],
+        history[-1][6],
+        history[-1][7],
+    )
     return history
 
 
@@ -228,6 +298,14 @@ def _action_to_traffic_signal(action: int, current_weight: float):
 @app.post("/predict")
 async def predict(request: InferenceRequest):
     started_at = time.perf_counter()
+    logger.info(
+        "predict_request_received app=%s ns=%s current_weight=%.2f canary_service=%s stable_service=%s",
+        request.app_info.name,
+        request.app_info.namespace,
+        request.app_info.weight,
+        request.app_info.canary_service,
+        request.app_info.stable_service,
+    )
 
     if not MODEL_READY:
         logger.warning("predict model_not_ready")
@@ -236,15 +314,21 @@ async def predict(request: InferenceRequest):
     try:
         data = _build_history_from_prometheus(request.app_info)
     except httpx.HTTPError as exc:
+        logger.exception("predict_prometheus_query_failed app=%s error=%s", request.app_info.name, exc)
         raise HTTPException(status_code=502, detail=f"Cannot query Prometheus: {exc}")
     except Exception as exc:
+        logger.exception("predict_build_history_failed app=%s error=%s", request.app_info.name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
     
     input_tensor = torch.FloatTensor([data]).to(DEVICE)
+    logger.info("predict_input_tensor_ready shape=%s device=%s", tuple(input_tensor.shape), DEVICE)
 
     with torch.no_grad():
         q_values, _ = model(input_tensor)
         action = torch.argmax(q_values).item()
+
+    q_values_list = [float(v) for v in q_values.squeeze(0).tolist()]
+    logger.info("predict_model_output q_values=%s chosen_action=%d", q_values_list, action)
 
     # --- ĐỒNG BỘ HÓA VỚI ARGO ROLLOUTS TẠI ĐÂY ---
     # 0, 1: AI muốn tiến lên -> Argo trả về "Successful" để nhảy step tiếp theo [cite: 56]
@@ -292,4 +376,5 @@ async def predict(request: InferenceRequest):
 
 @app.get("/health")
 def health():
+    logger.info("health_check status=alive")
     return {"status": "alive"}
