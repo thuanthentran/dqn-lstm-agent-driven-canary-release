@@ -20,7 +20,7 @@ spec:
         image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:16d1539
         env:
         - name: MODEL_PATH
-          value: models/model_canary_drqn.pth
+          value: models/model_canary_drqn_best.pth
         - name: PROMETHEUS_URL
           value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
 ---
