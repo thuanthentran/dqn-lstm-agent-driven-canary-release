@@ -1,6 +1,6 @@
 import os
 import time
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 import logging
 
 import httpx
@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+from core.feature_pipeline import RAW_KEYS, STATE_KEYS, RunningFeatureStats, normalize_raw_metrics, to_state_vector
 
 # --- 1. KIẾN TRÚC MÔ HÌNH (DRQN) ---
 class DRQN(nn.Module):
@@ -35,6 +37,16 @@ PROMETHEUS_URL = os.getenv(
 PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "30s")
 PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
 PROM_QUERY_TIMEOUT_SECONDS = float(os.getenv("PROM_QUERY_TIMEOUT_SECONDS", "5"))
+FEATURE_STATS_LOG_EVERY = int(os.getenv("FEATURE_STATS_LOG_EVERY", "20"))
+SAFETY_GUARD_ENABLED = os.getenv("SAFETY_GUARD_ENABLED", "true").lower() == "true"
+SAFETY_MIN_RPS = float(os.getenv("SAFETY_MIN_RPS", "3.0"))
+SAFETY_RUNNING_ERROR_RATIO = float(os.getenv("SAFETY_RUNNING_ERROR_RATIO", "1.8"))
+SAFETY_RUNNING_LAT_RATIO = float(os.getenv("SAFETY_RUNNING_LAT_RATIO", "1.8"))
+SAFETY_ROLLBACK_ERROR_RATIO = float(os.getenv("SAFETY_ROLLBACK_ERROR_RATIO", "3.0"))
+SAFETY_ROLLBACK_ERROR_GAP = float(os.getenv("SAFETY_ROLLBACK_ERROR_GAP", "0.15"))
+SAFETY_ROLLBACK_LAT_RATIO = float(os.getenv("SAFETY_ROLLBACK_LAT_RATIO", "2.5"))
+SAFETY_ROLLBACK_LAT_GAP_SEC = float(os.getenv("SAFETY_ROLLBACK_LAT_GAP_SEC", "0.12"))
+SAFETY_ROLLBACK_MIN_WEIGHT = float(os.getenv("SAFETY_ROLLBACK_MIN_WEIGHT", "5.0"))
 
 app = FastAPI(title="Canary AI Agent Service")
 
@@ -43,6 +55,9 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger("canary-ai-agent")
+raw_feature_stats = RunningFeatureStats(RAW_KEYS)
+state_feature_stats = RunningFeatureStats(STATE_KEYS)
+feature_stats_updates = 0
 
 logger.info(
     "service_boot config model_path=%s prom_url=%s step=%s window_seconds=%d timeout_seconds=%.1f seq_length=%d device=%s",
@@ -178,7 +193,7 @@ def _latest_value(values: List[float], default: float = 0.0) -> float:
     return float(values[-1])
 
 
-def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]], bool, float]:
+def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]], bool, float, Dict[str, float], Dict[str, float]]:
     build_started_at = time.perf_counter()
     end_ts = int(time.time())
     start_ts = end_ts - PROM_QUERY_WINDOW_SECONDS
@@ -300,38 +315,50 @@ def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]]
         observed_weight = (latest_canary_rps / latest_total_rps) * 100.0
 
     history = []
+    latest_raw: Dict[str, float] = {}
+    latest_state: Dict[str, float] = {}
     for i in range(SEQ_LENGTH):
-        history.append(
-            [
-                observed_weight,
-                e_canary[i],
-                e_stable[i],
-                l_canary[i],
-                l_stable[i],
-                cpu[i],
-                mem[i],
-                rps[i] / 1000.0,
-            ]
-        )
+        raw = {
+            "weight_pct": observed_weight,
+            "e_canary": e_canary[i],
+            "e_stable": e_stable[i],
+            "l_canary": l_canary[i],
+            "l_stable": l_stable[i],
+            "cpu": cpu[i],
+            "mem_mb": mem[i],
+            "rps": rps[i],
+        }
+        history.append(to_state_vector(raw))
+        if i == SEQ_LENGTH - 1:
+            latest_raw = raw
+            latest_state = normalize_raw_metrics(raw)
 
     logger.info(
-        "history_build_success app=%s ns=%s samples=%d duration_ms=%.1f data_complete=%s latest_snapshot={reported_weight:%.2f,observed_weight:%.2f,e_canary:%.4f,e_stable:%.4f,l_canary:%.4f,l_stable:%.4f,cpu:%.4f,mem:%.2f,rps_k:%.4f}",
+        "history_build_success app=%s ns=%s samples=%d duration_ms=%.1f data_complete=%s latest_raw={reported_weight:%.2f,observed_weight:%.2f,e_canary:%.4f,e_stable:%.4f,l_canary:%.4f,l_stable:%.4f,cpu:%.4f,mem:%.2f,rps:%.4f} latest_state={weight_n:%.4f,e_ratio_n:%.4f,l_ratio_n:%.4f,e_gap_n:%.4f,l_gap_n:%.4f,cpu_n:%.4f,mem_n:%.4f,rps_n:%.4f}",
         app_info.name,
         app_info.namespace,
         len(history),
         (time.perf_counter() - build_started_at) * 1000.0,
         data_complete,
         float(app_info.weight),
-        history[-1][0],
-        history[-1][1],
-        history[-1][2],
-        history[-1][3],
-        history[-1][4],
-        history[-1][5],
-        history[-1][6],
-        history[-1][7],
+        latest_raw["weight_pct"],
+        latest_raw["e_canary"],
+        latest_raw["e_stable"],
+        latest_raw["l_canary"],
+        latest_raw["l_stable"],
+        latest_raw["cpu"],
+        latest_raw["mem_mb"],
+        latest_raw["rps"],
+        latest_state["weight_n"],
+        latest_state["e_ratio_n"],
+        latest_state["l_ratio_n"],
+        latest_state["e_gap_n"],
+        latest_state["l_gap_n"],
+        latest_state["cpu_n"],
+        latest_state["mem_n"],
+        latest_state["rps_n"],
     )
-    return history, data_complete, observed_weight
+    return history, data_complete, observed_weight, latest_raw, latest_state
 
 
 def _action_to_traffic_signal(action: int, current_weight: float):
@@ -348,9 +375,49 @@ def _action_to_traffic_signal(action: int, current_weight: float):
         return "rollback", 0.0
     return "hold", current_weight
 
+
+def _evaluate_safety_guard(latest_raw: Dict[str, float], observed_weight: float) -> Tuple[str, str]:
+    if not SAFETY_GUARD_ENABLED:
+        return "", "disabled"
+
+    rps = float(latest_raw.get("rps", 0.0))
+    if rps < SAFETY_MIN_RPS:
+        return "", "insufficient-rps"
+
+    e_canary = float(latest_raw.get("e_canary", 0.0))
+    e_stable = float(latest_raw.get("e_stable", 0.0))
+    l_canary = float(latest_raw.get("l_canary", 0.0))
+    l_stable = float(latest_raw.get("l_stable", 0.0))
+
+    e_ratio = e_canary / max(e_stable, 1e-6)
+    l_ratio = l_canary / max(l_stable, 1e-6)
+    e_gap = max(0.0, e_canary - e_stable)
+    l_gap_sec = max(0.0, l_canary - l_stable)
+
+    severe_error = e_ratio >= SAFETY_ROLLBACK_ERROR_RATIO and e_gap >= SAFETY_ROLLBACK_ERROR_GAP
+    severe_latency = l_ratio >= SAFETY_ROLLBACK_LAT_RATIO and l_gap_sec >= SAFETY_ROLLBACK_LAT_GAP_SEC
+    if observed_weight >= SAFETY_ROLLBACK_MIN_WEIGHT and (severe_error or severe_latency):
+        reason = (
+            f"rollback:e_ratio={e_ratio:.2f},e_gap={e_gap:.4f},"
+            f"l_ratio={l_ratio:.2f},l_gap_sec={l_gap_sec:.3f},rps={rps:.2f},weight={observed_weight:.2f}"
+        )
+        return "Rollback", reason
+
+    elevated_error = e_ratio >= SAFETY_RUNNING_ERROR_RATIO
+    elevated_latency = l_ratio >= SAFETY_RUNNING_LAT_RATIO
+    if elevated_error or elevated_latency:
+        reason = (
+            f"running:e_ratio={e_ratio:.2f},l_ratio={l_ratio:.2f},"
+            f"rps={rps:.2f},weight={observed_weight:.2f}"
+        )
+        return "Running", reason
+
+    return "", "pass"
+
 # --- 4. ENDPOINT DỰ ĐOÁN (ĐÃ TINH CHỈNH MAPPING) ---
 @app.post("/predict")
 async def predict(request: InferenceRequest):
+    global feature_stats_updates
     started_at = time.perf_counter()
     incoming_weight = float(request.app_info.weight)
     logger.info(
@@ -367,13 +434,24 @@ async def predict(request: InferenceRequest):
         raise HTTPException(status_code=503, detail="Model is not ready")
 
     try:
-        data, data_complete, observed_weight = _build_history_from_prometheus(request.app_info)
+        data, data_complete, observed_weight, latest_raw, latest_state = _build_history_from_prometheus(request.app_info)
     except httpx.HTTPError as exc:
         logger.exception("predict_prometheus_query_failed app=%s error=%s", request.app_info.name, exc)
         raise HTTPException(status_code=502, detail=f"Cannot query Prometheus: {exc}")
     except Exception as exc:
         logger.exception("predict_build_history_failed app=%s error=%s", request.app_info.name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
+
+    raw_feature_stats.update(latest_raw)
+    state_feature_stats.update(latest_state)
+    feature_stats_updates += 1
+    if feature_stats_updates % FEATURE_STATS_LOG_EVERY == 0:
+        logger.info(
+            "feature_distribution_snapshot samples=%d raw=%s state=%s",
+            feature_stats_updates,
+            raw_feature_stats.summary(),
+            state_feature_stats.summary(),
+        )
 
     if not data_complete:
         latency_ms = (time.perf_counter() - started_at) * 1000.0
@@ -418,6 +496,19 @@ async def predict(request: InferenceRequest):
     
     decision = action_mapping.get(action, "Running")
     confidence = float(torch.softmax(q_values, dim=1).max())
+
+    guard_decision, guard_reason = _evaluate_safety_guard(latest_raw, observed_weight)
+    if guard_decision:
+        logger.warning(
+            "safety_guard_override app=%s ns=%s model_action=%d model_decision=%s override_decision=%s reason=%s",
+            request.app_info.name,
+            request.app_info.namespace,
+            action,
+            decision,
+            guard_decision,
+            guard_reason,
+        )
+        decision = guard_decision
 
     traffic_signal, suggested_weight = _action_to_traffic_signal(action, observed_weight)
     latency_ms = (time.perf_counter() - started_at) * 1000.0
