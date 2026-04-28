@@ -22,9 +22,9 @@ spec:
           image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
           env:
             - name: APP_SCENARIO
-              value: "healthy"
+              value: "critical_crash"
             - name: APP_VERSION
-              value: "v1"
+              value: "v4.0.0"
           ports:
             - name: http
               containerPort: 8080
