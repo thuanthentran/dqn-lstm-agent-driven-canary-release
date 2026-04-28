@@ -1,5 +1,11 @@
-import sys
 import os
+
+# Windows/Conda on this workspace can load duplicate OpenMP runtimes through
+# numpy/torch/matplotlib. Set the compatibility flag before importing those libs.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,8 +25,10 @@ SEQ_LENGTH = 10
 BATCH_SIZE = 32
 GAMMA = 0.99
 LR = 1e-4
-EPS_START, EPS_END, EPS_DECAY = 1.0, 0.05, 0.998
+EPS_START, EPS_END, EPS_DECAY = 1.0, 0.05, float(os.getenv("EPS_DECAY", "0.999"))
 TARGET_UPDATE = 10
+MOVING_AVG_WINDOW = int(os.getenv("MOVING_AVG_WINDOW", "100"))
+TRAIN_EPISODES = int(os.getenv("TRAIN_EPISODES", "12000"))
 
 class Trainer:
     def __init__(self):
@@ -33,6 +41,11 @@ class Trainer:
         self.epsilon = EPS_START
         self.episode_rewards = []
         self.episode_epsilons = []
+        self.moving_avg_rewards = []
+        self.best_moving_avg = float("-inf")
+        # Create models directory with absolute path
+        self.models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
+        os.makedirs(self.models_dir, exist_ok=True)
 
     def select_action(self, state_seq):
         if random.random() < self.epsilon:
@@ -65,8 +78,8 @@ class Trainer:
         self.optimizer.step()
 
     def train(self, episodes=8000, plot_path="logs/training_metrics.png"):
+        episodes = int(os.getenv("TRAIN_EPISODES", str(episodes)))
         os.makedirs("logs", exist_ok=True)
-        os.makedirs("../models", exist_ok=True)
         
         print(f"--- Bắt đầu huấn luyện trên {DEVICE} ---")
         for ep in range(episodes):
@@ -93,30 +106,42 @@ class Trainer:
             self.episode_rewards.append(total_reward)
             self.episode_epsilons.append(self.epsilon)
 
+            window_start = max(0, len(self.episode_rewards) - MOVING_AVG_WINDOW)
+            moving_avg_reward = float(np.mean(self.episode_rewards[window_start:]))
+            self.moving_avg_rewards.append(moving_avg_reward)
+
+            if moving_avg_reward > self.best_moving_avg:
+                self.best_moving_avg = moving_avg_reward
+                best_model_path = os.path.join(self.models_dir, "model_canary_drqn_best.pth")
+                torch.save(self.policy_net.state_dict(), best_model_path)
+
             if ep % TARGET_UPDATE == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
             
             if (ep + 1) % 10 == 0:
                 scenario_name = SCENARIO_NAMES.get(self.env.scenario, "Unknown")
                 action_seq = " -> ".join(action_trace)
-                print(f"[{ep + 1:5d}/{episodes}] Reward={total_reward:8.2f} | Scenario={scenario_name:<15} | Steps={len(action_trace):2d} | Eps={self.epsilon:.3f}")
+                print(f"[{ep + 1:5d}/{episodes}] Reward={total_reward:8.2f} | MA{MOVING_AVG_WINDOW}={moving_avg_reward:8.2f} | BestMA={self.best_moving_avg:8.2f} | Scenario={scenario_name:<15} | Steps={len(action_trace):2d} | Eps={self.epsilon:.3f}")
                 print(f"  Actions: {action_seq}")
 
-        torch.save(self.policy_net.state_dict(), "../models/model_canary_drqn.pth")
+        torch.save(self.policy_net.state_dict(), os.path.join(self.models_dir, "model_canary_drqn.pth"))
         self.plot_training_metrics(plot_path)
 
     def plot_training_metrics(self, output_path):
         plt.figure(figsize=(12, 8))
         plt.subplot(2, 1, 1)
         plt.plot(self.episode_rewards, alpha=0.5, label="Reward")
+        plt.plot(self.moving_avg_rewards, color="orange", linewidth=2.0, label=f"Moving Avg ({MOVING_AVG_WINDOW})")
         plt.title("Training Reward Progress")
+        plt.legend()
         plt.subplot(2, 1, 2)
         plt.plot(self.episode_epsilons, color='green', label="Epsilon")
         plt.title("Exploration Rate (Epsilon)")
+        plt.legend()
         plt.tight_layout()
         plt.savefig(output_path)
         print(f"[PLOT] Đã lưu biểu đồ tại: {output_path}")
 
 if __name__ == "__main__":
     trainer = Trainer()
-    trainer.train(episodes=8000)
+    trainer.train(episodes=TRAIN_EPISODES)
