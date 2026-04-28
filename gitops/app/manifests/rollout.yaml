@@ -18,43 +18,62 @@ spec:
       # Xóa images cũ khi pod terminate
       terminationGracePeriodSeconds: 30
       containers:
-      - name: my-app
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
-        env:
-        - name: APP_SCENARIO
-          value: "healthy"
-        - name: APP_VERSION
-          value: "v1"
-        ports:
-        - name: http
-          containerPort: 8080
-  
+        - name: my-app
+          image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
+          env:
+            - name: APP_SCENARIO
+              value: "healthy"
+            - name: APP_VERSION
+              value: "v1"
+          ports:
+            - name: http
+              containerPort: 8080
+
   strategy:
     canary:
       dynamicStableScale: true
       maxSurge: 1
       maxUnavailable: 0
-      # --- ĐIỂM CẬP NHẬT QUAN TRỌNG: TRAFFIC ROUTING ---
-      canaryService: my-app-canary # Service trỏ tới bản mới
-      stableService: my-app-stable # Service trỏ tới bản cũ
+      canaryService: my-app-canary
+      stableService: my-app-stable
       trafficRouting:
         nginx:
-          stableIngress: my-app-ingress # Ingress gốc của ứng dụng
-      
-      # Analysis chạy song song để AI chấm điểm
-      analysis:
-        templates:
-        - templateName: ai-dqn-decision
-        args:
-        - name: rollout-name
-          value: "my-app-v2"
-      
-      # Lộ trình tăng traffic
+          stableIngress: my-app-ingress
+
+      # XÓA block analysis global ở đây đi
+
       steps:
-      - setWeight: 10
-      - pause: {duration: 1m} # Chờ AI Agent phân tích
-      - setWeight: 30
-      - pause: {duration: 2m}
-      - setWeight: 60
-      - pause: {duration: 2m}
-      - setWeight: 100
+        - setWeight: 10
+        - analysis:
+            # AI giám sát mốc 10%
+            templates:
+              - templateName: ai-dqn-decision
+            args:
+              - name: rollout-name
+                value: "my-app-v2"
+              - name: target-weight
+                value: "10"
+
+        - setWeight: 30
+        - analysis:
+            # AI giám sát mốc 30%
+            templates:
+              - templateName: ai-dqn-decision
+            args:
+              - name: rollout-name
+                value: "my-app-v2"
+              - name: target-weight
+                value: "30"
+
+        - setWeight: 60
+        - analysis:
+            # AI giám sát mốc 60%
+            templates:
+              - templateName: ai-dqn-decision
+            args:
+              - name: rollout-name
+                value: "my-app-v2"
+              - name: target-weight
+                value: "60"
+
+        - setWeight: 100

@@ -1,5 +1,6 @@
 import os
 import time
+import asyncio
 from typing import Dict, List, Tuple
 import logging
 
@@ -22,7 +23,6 @@ class DRQN(nn.Module):
     def forward(self, x, hidden=None):
         x = torch.relu(self.fc1(x))
         x, hidden = self.lstm(x, hidden)
-        # Lấy timestep cuối cùng của chuỗi (Sequence length = 10) [cite: 35, 81]
         x = self.fc2(x[:, -1, :]) 
         return x, hidden
 
@@ -59,17 +59,6 @@ raw_feature_stats = RunningFeatureStats(RAW_KEYS)
 state_feature_stats = RunningFeatureStats(STATE_KEYS)
 feature_stats_updates = 0
 
-logger.info(
-    "service_boot config model_path=%s prom_url=%s step=%s window_seconds=%d timeout_seconds=%.1f seq_length=%d device=%s",
-    MODEL_PATH,
-    PROMETHEUS_URL,
-    PROM_QUERY_STEP,
-    PROM_QUERY_WINDOW_SECONDS,
-    PROM_QUERY_TIMEOUT_SECONDS,
-    SEQ_LENGTH,
-    DEVICE,
-)
-
 # Load model đã huấn luyện
 model = DRQN(n_obs=8, n_actions=5).to(DEVICE)
 MODEL_READY = False
@@ -92,8 +81,8 @@ class AppInfo(BaseModel):
 class InferenceRequest(BaseModel):
     app_info: AppInfo
 
-
-def _prom_query_range(
+# Chuyển thành async function và dùng httpx.AsyncClient
+async def _prom_query_range(
     query: str,
     start_ts: int,
     end_ts: int,
@@ -106,45 +95,27 @@ def _prom_query_range(
         "end": end_ts,
         "step": step,
     }
-    logger.info(
-        "prom_query_start start_ts=%d end_ts=%d step=%s query=%s",
-        start_ts,
-        end_ts,
-        step,
-        query,
-    )
     query_started_at = time.perf_counter()
     try:
-        with httpx.Client(timeout=PROM_QUERY_TIMEOUT_SECONDS) as client:
-            response = client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
+        async with httpx.AsyncClient(timeout=PROM_QUERY_TIMEOUT_SECONDS) as client:
+            response = await client.get(f"{PROMETHEUS_URL}/api/v1/query_range", params=params)
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPError as exc:
-        # Trả về rỗng để agent vẫn phản hồi /predict, tránh làm AnalysisRun lỗi sớm.
-        logger.warning(
-            "prom_query_http_error query=%s error=%s",
-            query,
-            exc,
-        )
+        logger.warning("prom_query_http_error query=%s error=%s", query, exc)
         return []
 
     if payload.get("status") != "success":
-        logger.warning(
-            "prom_query_bad_status query=%s status=%s",
-            query,
-            payload.get("status"),
-        )
+        logger.warning("prom_query_bad_status query=%s status=%s", query, payload.get("status"))
         return []
 
     result = payload.get("data", {}).get("result", [])
     if not result:
         if empty_as_zero:
-            logger.info("prom_query_empty_result_as_zero query=%s", query)
             return [0.0]
         logger.warning("prom_query_empty_result query=%s", query)
         return []
 
-    # Query mong đợi trả về đúng 1 series tổng hợp.
     points = result[0].get("values", [])
     series = []
     for _, value in points:
@@ -161,39 +132,21 @@ def _prom_query_range(
     )
     return series
 
-
 def _normalize_series(values: List[float], length: int, default: float = 0.0) -> List[float]:
     if not values:
-        logger.warning(
-            "normalize_series_empty default_applied length=%d default=%.3f",
-            length,
-            default,
-        )
         return [default] * length
     if len(values) >= length:
-        logger.info(
-            "normalize_series_trim original_len=%d target_len=%d",
-            len(values),
-            length,
-        )
         return values[-length:]
     pad = [values[0]] * (length - len(values))
-    logger.info(
-        "normalize_series_pad original_len=%d target_len=%d pad_count=%d",
-        len(values),
-        length,
-        len(pad),
-    )
     return pad + values
-
 
 def _latest_value(values: List[float], default: float = 0.0) -> float:
     if not values:
         return default
     return float(values[-1])
 
-
-def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]], bool, float, Dict[str, float], Dict[str, float]]:
+# Chuyển thành async function
+async def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]], bool, float, Dict[str, float], Dict[str, float], float]:
     build_started_at = time.perf_counter()
     end_ts = int(time.time())
     start_ts = end_ts - PROM_QUERY_WINDOW_SECONDS
@@ -202,117 +155,63 @@ def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]]
     canary_svc = app_info.canary_service
     stable_svc = app_info.stable_service
 
-    e_canary = _prom_query_range(
-        (
-            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\",status=~\"5..\"}}[1m]))"
-            f" / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m])), 0.001)"
+    # Tạo danh sách các task chạy song song (Concurrency)
+    tasks = [
+        _prom_query_range(
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\",status=~\"5..\"}}[1m])) / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m])), 0.001)",
+            start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-        empty_as_zero=True,
-    )
-    e_stable = _prom_query_range(
-        (
-            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\",status=~\"5..\"}}[1m]))"
-            f" / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m])), 0.001)"
+        _prom_query_range(
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\",status=~\"5..\"}}[1m])) / clamp_min(sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m])), 0.001)",
+            start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-        empty_as_zero=True,
-    )
-    l_canary = _prom_query_range(
-        (
-            "histogram_quantile(0.95, "
-            f"sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m]))"
-            ")"
+        _prom_query_range(
+            f"histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m])))",
+            start_ts, end_ts, PROM_QUERY_STEP
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    l_stable = _prom_query_range(
-        (
-            "histogram_quantile(0.95, "
-            f"sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m]))"
-            ")"
+        _prom_query_range(
+            f"histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m])))",
+            start_ts, end_ts, PROM_QUERY_STEP
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    canary_rps = _prom_query_range(
-        f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m]))",
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    stable_rps = _prom_query_range(
-        f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m]))",
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    cpu = _prom_query_range(
-        (
-            "avg(rate(container_cpu_usage_seconds_total{"
-            f"namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\""
-            "}[1m]))"
+        _prom_query_range(
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{canary_svc}\"}}[1m]))",
+            start_ts, end_ts, PROM_QUERY_STEP
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    mem = _prom_query_range(
-        (
-            "avg(container_memory_working_set_bytes{"
-            f"namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\""
-            "}) / 1048576"
+        _prom_query_range(
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=\"{stable_svc}\"}}[1m]))",
+            start_ts, end_ts, PROM_QUERY_STEP
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-    rps = _prom_query_range(
-        (
-            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=~\"{canary_svc}|{stable_svc}\"}}[1m]))"
+        _prom_query_range(
+            f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\"}}[1m]))",
+            start_ts, end_ts, PROM_QUERY_STEP
         ),
-        start_ts,
-        end_ts,
-        PROM_QUERY_STEP,
-    )
-
-    # Required live signals for safe inference. Error-rate queries can legitimately be empty when there are no 5xx.
-    data_complete = all(
-        series
-        for series in (
-            l_canary,
-            l_stable,
-            canary_rps,
-            stable_rps,
-            cpu,
-            mem,
-            rps,
+        _prom_query_range(
+            f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\"my-app-release-.*\",container!=\"\",container!=\"POD\"}}) / 1048576",
+            start_ts, end_ts, PROM_QUERY_STEP
+        ),
+        _prom_query_range(
+            f"sum(rate(http_requests_total{{namespace=\"{ns}\",service=~\"{canary_svc}|{stable_svc}\"}}[1m]))",
+            start_ts, end_ts, PROM_QUERY_STEP
         )
-    )
+    ]
+
+    # Thực thi toàn bộ HTTP requests cùng một lúc
+    results = await asyncio.gather(*tasks)
+    (e_canary, e_stable, l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps) = results
+
+    data_complete = all(series for series in (l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps))
+
+    latest_canary_rps = _latest_value(canary_rps) # Lấy giá trị để check Dead Pod
 
     e_canary = _normalize_series(e_canary, SEQ_LENGTH)
     e_stable = _normalize_series(e_stable, SEQ_LENGTH)
     l_canary = _normalize_series(l_canary, SEQ_LENGTH)
     l_stable = _normalize_series(l_stable, SEQ_LENGTH)
-    canary_rps = _normalize_series(canary_rps, SEQ_LENGTH)
-    stable_rps = _normalize_series(stable_rps, SEQ_LENGTH)
     cpu = _normalize_series(cpu, SEQ_LENGTH)
     mem = _normalize_series(mem, SEQ_LENGTH)
     rps = _normalize_series(rps, SEQ_LENGTH)
 
-    latest_canary_rps = _latest_value(canary_rps)
-    latest_stable_rps = _latest_value(stable_rps)
-    latest_total_rps = latest_canary_rps + latest_stable_rps
     observed_weight = float(app_info.weight)
-    if latest_total_rps > 0.0:
-        observed_weight = (latest_canary_rps / latest_total_rps) * 100.0
 
     history = []
     latest_raw: Dict[str, float] = {}
@@ -333,202 +232,101 @@ def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]]
             latest_raw = raw
             latest_state = normalize_raw_metrics(raw)
 
-    logger.info(
-        "history_build_success app=%s ns=%s samples=%d duration_ms=%.1f data_complete=%s latest_raw={reported_weight:%.2f,observed_weight:%.2f,e_canary:%.4f,e_stable:%.4f,l_canary:%.4f,l_stable:%.4f,cpu:%.4f,mem:%.2f,rps:%.4f} latest_state={weight_n:%.4f,e_ratio_n:%.4f,l_ratio_n:%.4f,e_gap_n:%.4f,l_gap_n:%.4f,cpu_n:%.4f,mem_n:%.4f,rps_n:%.4f}",
-        app_info.name,
-        app_info.namespace,
-        len(history),
-        (time.perf_counter() - build_started_at) * 1000.0,
-        data_complete,
-        float(app_info.weight),
-        latest_raw["weight_pct"],
-        latest_raw["e_canary"],
-        latest_raw["e_stable"],
-        latest_raw["l_canary"],
-        latest_raw["l_stable"],
-        latest_raw["cpu"],
-        latest_raw["mem_mb"],
-        latest_raw["rps"],
-        latest_state["weight_n"],
-        latest_state["e_ratio_n"],
-        latest_state["l_ratio_n"],
-        latest_state["e_gap_n"],
-        latest_state["l_gap_n"],
-        latest_state["cpu_n"],
-        latest_state["mem_n"],
-        latest_state["rps_n"],
-    )
-    return history, data_complete, observed_weight, latest_raw, latest_state
+    logger.info("history_build_success duration_ms=%.1f data_complete=%s", (time.perf_counter() - build_started_at) * 1000.0, data_complete)
+    return history, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps
 
 
 def _action_to_traffic_signal(action: int, current_weight: float):
-    # Heuristic signal for logs only; Argo still controls actual setWeight steps.
-    if action == 0:
-        return "increase-fast", min(100.0, current_weight + 10.0)
-    if action == 1:
-        return "increase-slow", min(100.0, current_weight + 5.0)
-    if action == 2:
-        return "hold", current_weight
-    if action == 3:
-        return "decrease", max(0.0, current_weight - 5.0)
-    if action == 4:
-        return "rollback", 0.0
+    if action == 0: return "increase-fast", min(100.0, current_weight + 10.0)
+    if action == 1: return "increase-slow", min(100.0, current_weight + 5.0)
+    if action == 2: return "hold", current_weight
+    if action == 3: return "decrease", max(0.0, current_weight - 5.0)
+    if action == 4: return "rollback", 0.0
     return "hold", current_weight
 
 
 def _evaluate_safety_guard(latest_raw: Dict[str, float], observed_weight: float) -> Tuple[str, str]:
-    if not SAFETY_GUARD_ENABLED:
-        return "", "disabled"
-
+    if not SAFETY_GUARD_ENABLED: return "", "disabled"
+    
     rps = float(latest_raw.get("rps", 0.0))
-    if rps < SAFETY_MIN_RPS:
-        return "", "insufficient-rps"
+    if rps < SAFETY_MIN_RPS: return "", "insufficient-rps"
 
-    e_canary = float(latest_raw.get("e_canary", 0.0))
-    e_stable = float(latest_raw.get("e_stable", 0.0))
-    l_canary = float(latest_raw.get("l_canary", 0.0))
-    l_stable = float(latest_raw.get("l_stable", 0.0))
+    e_ratio = float(latest_raw.get("e_canary", 0.0)) / max(float(latest_raw.get("e_stable", 0.0)), 1e-6)
+    l_ratio = float(latest_raw.get("l_canary", 0.0)) / max(float(latest_raw.get("l_stable", 0.0)), 1e-6)
+    e_gap = max(0.0, float(latest_raw.get("e_canary", 0.0)) - float(latest_raw.get("e_stable", 0.0)))
+    l_gap_sec = max(0.0, float(latest_raw.get("l_canary", 0.0)) - float(latest_raw.get("l_stable", 0.0)))
 
-    e_ratio = e_canary / max(e_stable, 1e-6)
-    l_ratio = l_canary / max(l_stable, 1e-6)
-    e_gap = max(0.0, e_canary - e_stable)
-    l_gap_sec = max(0.0, l_canary - l_stable)
+    if observed_weight >= SAFETY_ROLLBACK_MIN_WEIGHT:
+        if (e_ratio >= SAFETY_ROLLBACK_ERROR_RATIO and e_gap >= SAFETY_ROLLBACK_ERROR_GAP) or \
+           (l_ratio >= SAFETY_ROLLBACK_LAT_RATIO and l_gap_sec >= SAFETY_ROLLBACK_LAT_GAP_SEC):
+            return "Rollback", "severe-threshold-breach"
 
-    severe_error = e_ratio >= SAFETY_ROLLBACK_ERROR_RATIO and e_gap >= SAFETY_ROLLBACK_ERROR_GAP
-    severe_latency = l_ratio >= SAFETY_ROLLBACK_LAT_RATIO and l_gap_sec >= SAFETY_ROLLBACK_LAT_GAP_SEC
-    if observed_weight >= SAFETY_ROLLBACK_MIN_WEIGHT and (severe_error or severe_latency):
-        reason = (
-            f"rollback:e_ratio={e_ratio:.2f},e_gap={e_gap:.4f},"
-            f"l_ratio={l_ratio:.2f},l_gap_sec={l_gap_sec:.3f},rps={rps:.2f},weight={observed_weight:.2f}"
-        )
-        return "Rollback", reason
-
-    elevated_error = e_ratio >= SAFETY_RUNNING_ERROR_RATIO
-    elevated_latency = l_ratio >= SAFETY_RUNNING_LAT_RATIO
-    if elevated_error or elevated_latency:
-        reason = (
-            f"running:e_ratio={e_ratio:.2f},l_ratio={l_ratio:.2f},"
-            f"rps={rps:.2f},weight={observed_weight:.2f}"
-        )
-        return "Running", reason
+    if e_ratio >= SAFETY_RUNNING_ERROR_RATIO or l_ratio >= SAFETY_RUNNING_LAT_RATIO:
+        return "Running", "elevated-metrics"
 
     return "", "pass"
 
-# --- 4. ENDPOINT DỰ ĐOÁN (ĐÃ TINH CHỈNH MAPPING) ---
+# --- 4. ENDPOINT DỰ ĐOÁN ---
 @app.post("/predict")
 async def predict(request: InferenceRequest):
     global feature_stats_updates
     started_at = time.perf_counter()
     incoming_weight = float(request.app_info.weight)
-    logger.info(
-        "predict_request_received app=%s ns=%s incoming_weight=%.2f canary_service=%s stable_service=%s",
-        request.app_info.name,
-        request.app_info.namespace,
-        incoming_weight,
-        request.app_info.canary_service,
-        request.app_info.stable_service,
-    )
 
     if not MODEL_READY:
-        logger.warning("predict model_not_ready")
         raise HTTPException(status_code=503, detail="Model is not ready")
 
     try:
-        data, data_complete, observed_weight, latest_raw, latest_state = _build_history_from_prometheus(request.app_info)
-    except httpx.HTTPError as exc:
-        logger.exception("predict_prometheus_query_failed app=%s error=%s", request.app_info.name, exc)
-        raise HTTPException(status_code=502, detail=f"Cannot query Prometheus: {exc}")
+        # Await luồng xử lý bất đồng bộ
+        data, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps = await _build_history_from_prometheus(request.app_info)
     except Exception as exc:
         logger.exception("predict_build_history_failed app=%s error=%s", request.app_info.name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
 
-    raw_feature_stats.update(latest_raw)
-    state_feature_stats.update(latest_state)
-    feature_stats_updates += 1
-    if feature_stats_updates % FEATURE_STATS_LOG_EVERY == 0:
-        logger.info(
-            "feature_distribution_snapshot samples=%d raw=%s state=%s",
-            feature_stats_updates,
-            raw_feature_stats.summary(),
-            state_feature_stats.summary(),
-        )
+    # --- CHỐT CHẶN DEAD POD ---
+    # Nếu weight > 0 (đã có traffic) nhưng canary_rps = 0 sau 1 phút chờ, Pod đã crash ngầm
+    if observed_weight > 0 and latest_canary_rps == 0.0:
+        logger.error("canary_dead: Traffic routed but no metrics found. Triggering fallback Rollback.")
+        return {
+            "action_id": 4,
+            "decision": "Rollback",
+            "confidence": 1.0,
+            "traffic_signal": "rollback",
+            "suggested_weight": 0.0,
+            "latency_ms": (time.perf_counter() - started_at) * 1000.0,
+        }
 
+    # --- CHỐT CHẶN THIẾU DATA ---
     if not data_complete:
-        latency_ms = (time.perf_counter() - started_at) * 1000.0
-        logger.warning(
-            "predict_insufficient_metrics app=%s ns=%s incoming_weight=%.2f observed_weight=%.2f decision=Running latency_ms=%.1f",
-            request.app_info.name,
-            request.app_info.namespace,
-            incoming_weight,
-            observed_weight,
-            latency_ms,
-        )
         return {
             "action_id": -1,
             "decision": "Running",
             "confidence": 0.0,
             "traffic_signal": "hold",
             "suggested_weight": observed_weight,
-            "latency_ms": latency_ms,
+            "latency_ms": (time.perf_counter() - started_at) * 1000.0,
         }
-    
+
+    raw_feature_stats.update(latest_raw)
+    state_feature_stats.update(latest_state)
+
     input_tensor = torch.FloatTensor([data]).to(DEVICE)
-    logger.info("predict_input_tensor_ready shape=%s device=%s", tuple(input_tensor.shape), DEVICE)
 
     with torch.no_grad():
         q_values, _ = model(input_tensor)
         action = torch.argmax(q_values).item()
 
-    q_values_list = [float(v) for v in q_values.squeeze(0).tolist()]
-    logger.info("predict_model_output q_values=%s chosen_action=%d", q_values_list, action)
-
-    # --- ĐỒNG BỘ HÓA VỚI ARGO ROLLOUTS TẠI ĐÂY ---
-    # 0, 1: AI muốn tiến lên -> Argo trả về "Successful" để nhảy step tiếp theo [cite: 56]
-    # 2, 3: AI muốn giữ nguyên hoặc lùi lại -> Argo trả về "Running" để chờ [cite: 58]
-    # 4: AI muốn hủy bỏ ngay lập tức -> Argo trả về "Rollback" 
-    action_mapping = {
-        0: "Successful", # Fast Forward (+10%)
-        1: "Successful", # Step Forward (+5%)
-        2: "Running",    # Stay
-        3: "Running",    # Step Back
-        4: "Rollback"    # EMERGENCY ROLLBACK
-    }
-    
+    action_mapping = {0: "Successful", 1: "Successful", 2: "Running", 3: "Running", 4: "Rollback"}
     decision = action_mapping.get(action, "Running")
     confidence = float(torch.softmax(q_values, dim=1).max())
 
     guard_decision, guard_reason = _evaluate_safety_guard(latest_raw, observed_weight)
     if guard_decision:
-        logger.warning(
-            "safety_guard_override app=%s ns=%s model_action=%d model_decision=%s override_decision=%s reason=%s",
-            request.app_info.name,
-            request.app_info.namespace,
-            action,
-            decision,
-            guard_decision,
-            guard_reason,
-        )
         decision = guard_decision
 
     traffic_signal, suggested_weight = _action_to_traffic_signal(action, observed_weight)
-    latency_ms = (time.perf_counter() - started_at) * 1000.0
 
-    logger.info(
-        (
-            "predict app=%s ns=%s incoming_weight=%.2f observed_weight=%.2f action=%d "
-            "signal=%s suggested_weight=%.2f decision=%s confidence=%.4f latency_ms=%.1f"
-        ),
-        request.app_info.name,
-        request.app_info.namespace,
-        incoming_weight,
-        observed_weight,
-        action,
-        traffic_signal,
-        suggested_weight,
-        decision,
-        confidence,
-        latency_ms,
-    )
+    logger.info("predict finished action=%d decision=%s latency_ms=%.1f", action, decision, (time.perf_counter() - started_at) * 1000.0)
     
     return {
         "action_id": action,
@@ -536,10 +334,9 @@ async def predict(request: InferenceRequest):
         "confidence": confidence,
         "traffic_signal": traffic_signal,
         "suggested_weight": suggested_weight,
-        "latency_ms": latency_ms,
+        "latency_ms": (time.perf_counter() - started_at) * 1000.0,
     }
 
 @app.get("/health")
 def health():
-    logger.info("health_check status=alive")
     return {"status": "alive"}

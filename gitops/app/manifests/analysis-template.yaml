@@ -5,29 +5,32 @@ metadata:
   namespace: default
 spec:
   args:
-  - name: rollout-name
+    - name: rollout-name
+    - name: target-weight # 1. Khai báo nhận tham số target-weight từ Rollout
   metrics:
-  - name: ai-judgment
-    interval: 30s # Tần suất truy vấn AI Agent
-    count: 5
-    initialDelay: 20s
-    consecutiveErrorLimit: 10
-    provider:
-      web:
-        url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
-        method: POST
-        timeoutSeconds: 120
-        headers:
-        - key: "Content-Type"
-          value: "application/json"
-        jsonBody:
-          app_info:
-            name: "{{args.rollout-name}}"
-            namespace: "default"
-            canary_service: "my-app-canary"
-            stable_service: "my-app-stable"
-    # Thành công: Argo tiến tới bước (step) tiếp theo trong Rollout [cite: 2, 25]
-    successCondition: "result.decision == 'Successful'"
-    # Thất bại: Argo lập tức kích hoạt Rollback về phiên bản Stable [cite: 2, 28]
-    failureCondition: "result.decision == 'Rollback'"
-    # Lưu ý: Nếu result.decision là "Running", Argo sẽ đợi và kiểm tra lại sau 30 giây
+    - name: ai-judgment
+      interval: 30s
+      # 2. Tăng count lên cao (vd: 20) để AI có tối đa 10 phút quan sát tại MỖI step
+      # Nếu AI trả về "Running", Argo sẽ trừ đi 1 count và hỏi lại sau 30s.
+      count: 20 
+      # 3. ĐIỂM SỐNG CÒN: Đợi 60s để Prometheus gom đủ rate[1m] data cho mức traffic MỚI
+      initialDelay: 60s 
+      consecutiveErrorLimit: 10
+      provider:
+        web:
+          url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
+          method: POST
+          timeoutSeconds: 120
+          headers:
+            - key: "Content-Type"
+              value: "application/json"
+          jsonBody:
+            app_info:
+              name: "{{args.rollout-name}}"
+              weight: "{{args.target-weight}}" # 4. Truyền chính xác weight cho FastAPI
+              namespace: "default"
+              canary_service: "my-app-canary"
+              stable_service: "my-app-stable"
+      # Điều kiện quyết định vận mệnh của bản release
+      successCondition: "result.decision == 'Successful'"
+      failureCondition: "result.decision == 'Rollback'"
