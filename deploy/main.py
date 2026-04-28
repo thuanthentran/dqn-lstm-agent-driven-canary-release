@@ -27,7 +27,7 @@ class DRQN(nn.Module):
         return x, hidden
 
 # --- 2. CẤU HÌNH HỆ THỐNG ---
-MODEL_PATH = os.getenv("MODEL_PATH", "models/model_canary_drqn.pth")
+MODEL_PATH = os.getenv("MODEL_PATH", "models/model_canary_drqn_best.pth")
 SEQ_LENGTH = 10
 DEVICE = torch.device("cpu")
 PROMETHEUS_URL = os.getenv(
