@@ -19,6 +19,8 @@ spec:
       - name: ai-agent
         image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:467bd0b
         env:
+        - name: SAFETY_GUARD_ENABLED
+          value: "false"  # <--- Tắt lớp giáp bảo vệ tại đây
         - name: MODEL_PATH
           value: models/model_canary_drqn_best.pth
         - name: PROMETHEUS_URL
