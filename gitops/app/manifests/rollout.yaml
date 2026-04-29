@@ -5,7 +5,6 @@ metadata:
   namespace: default
 spec:
   replicas: 5
-  # Số lượng pod cũ cần giữ lại khi rollout (thường để 25% hoặc 0 tùy chiến lược)
   revisionHistoryLimit: 3
   selector:
     matchLabels:
@@ -15,7 +14,6 @@ spec:
       labels:
         app: my-app
     spec:
-      # Xóa images cũ khi pod terminate
       terminationGracePeriodSeconds: 30
       containers:
         - name: my-app
@@ -40,40 +38,43 @@ spec:
         nginx:
           stableIngress: my-app-ingress
 
-      # XÓA block analysis global ở đây đi
-
+      # KHỐI STEPS ĐÃ ĐƯỢC THỤT LÙI VÀO TRONG CANARY:
       steps:
+        # Giai đoạn thăm dò (Tăng chậm, rủi ro cao)
         - setWeight: 10
         - analysis:
-            # AI giám sát mốc 10%
-            templates:
-              - templateName: ai-dqn-decision
-            args:
-              - name: rollout-name
-                value: "my-app-v2"
-              - name: target-weight
-                value: "10"
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "10"}]
+
+        - setWeight: 20
+        - analysis:
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "20"}]
 
         - setWeight: 30
         - analysis:
-            # AI giám sát mốc 30%
-            templates:
-              - templateName: ai-dqn-decision
-            args:
-              - name: rollout-name
-                value: "my-app-v2"
-              - name: target-weight
-                value: "30"
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "30"}]
 
+        - setWeight: 40
+        - analysis:
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "40"}]
+
+        - setWeight: 50
+        - analysis:
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "50"}]
+
+        # Giai đoạn tăng tốc (Nếu qua được 50% thì thường là đã ổn)
         - setWeight: 60
         - analysis:
-            # AI giám sát mốc 60%
-            templates:
-              - templateName: ai-dqn-decision
-            args:
-              - name: rollout-name
-                value: "my-app-v2"
-              - name: target-weight
-                value: "60"
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "60"}]
+
+        - setWeight: 80
+        - analysis:
+            templates: [{templateName: ai-dqn-decision}]
+            args: [{name: rollout-name, value: "my-app-v2"}, {name: target-weight, value: "80"}]
 
         - setWeight: 100
