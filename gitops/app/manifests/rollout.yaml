@@ -22,7 +22,7 @@ spec:
             - name: APP_SCENARIO
               value: "latency_leak"
             - name: APP_VERSION
-              value: "v2"
+              value: "v2.0.0"
           ports:
             - name: http
               containerPort: 8080
