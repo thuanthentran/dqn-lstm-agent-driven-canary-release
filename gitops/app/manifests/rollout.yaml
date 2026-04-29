@@ -24,7 +24,7 @@ spec:
             - name: APP_SCENARIO
               value: "healthy"
             - name: APP_VERSION
-              value: "v1"
+              value: "v1.0.1"
           ports:
             - name: http
               containerPort: 8080
