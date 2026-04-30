@@ -12,7 +12,7 @@ spec:
       interval: 30s
       # 2. Tăng count lên cao (vd: 20) để AI có tối đa 10 phút quan sát tại MỖI step
       # Nếu AI trả về "Running", Argo sẽ trừ đi 1 count và hỏi lại sau 30s.
-      count: 20 
+      count: 5
       # 3. ĐIỂM SỐNG CÒN: Đợi 60s để Prometheus gom đủ rate[1m] data cho mức traffic MỚI
       initialDelay: 60s 
       consecutiveErrorLimit: 10
