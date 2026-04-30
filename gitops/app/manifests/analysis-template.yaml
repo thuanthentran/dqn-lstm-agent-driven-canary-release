@@ -6,16 +6,21 @@ metadata:
 spec:
   args:
     - name: rollout-name
-    - name: target-weight # 1. Khai báo nhận tham số target-weight từ Rollout
+    - name: target-weight
   metrics:
     - name: ai-judgment
       interval: 30s
-      # 2. Tăng count lên cao (vd: 20) để AI có tối đa 10 phút quan sát tại MỖI step
-      # Nếu AI trả về "Running", Argo sẽ trừ đi 1 count và hỏi lại sau 30s.
       count: 5
-      # 3. ĐIỂM SỐNG CÒN: Đợi 60s để Prometheus gom đủ rate[1m] data cho mức traffic MỚI
-      initialDelay: 60s 
-      consecutiveErrorLimit: 10
+      initialDelay: 60s
+      
+      # --- 1. TĂNG SỨC CHỊU ĐỰNG LỖI MẠNG (HTTP 500, Timeout) ---
+      # Cho phép Agent lỗi kết nối hoặc Prometheus timeout tối đa 5 lần liên tiếp
+      consecutiveErrorLimit: 5
+      
+      # --- 2. XỬ LÝ TRẠNG THÁI "CHỜ" CỦA AI ---
+      # Cho phép AI Agent trả về "Running" tối đa 5 lần (bằng đúng số count)
+      inconclusiveLimit: 3
+
       provider:
         web:
           url: "http://canary-ai-agent-svc.default.svc.cluster.local/predict"
@@ -27,10 +32,13 @@ spec:
           jsonBody:
             app_info:
               name: "{{args.rollout-name}}"
-              weight: "{{args.target-weight}}" # 4. Truyền chính xác weight cho FastAPI
+              weight: "{{args.target-weight}}"
               namespace: "default"
               canary_service: "my-app-canary"
               stable_service: "my-app-stable"
-      # Điều kiện quyết định vận mệnh của bản release
+              
+      # --- 3. ĐỊNH NGHĨA LẠI LUỒNG LOGIC QUYẾT ĐỊNH ---
       successCondition: "result.decision == 'Successful'"
       failureCondition: "result.decision == 'Rollback'"
+      # Thêm dòng này: Khi AI trả về "Running", Argo sẽ hiểu là "Chưa quyết định được, thử lại ở nhịp sau"
+      inconclusiveCondition: "result.decision == 'Running'"

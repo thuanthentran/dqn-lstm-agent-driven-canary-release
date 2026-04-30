@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   replicas: 5
-  revisionHistoryLimit: 3
+  revisionHistoryLimit: 0
   selector:
     matchLabels:
       app: my-app
@@ -37,6 +37,9 @@ spec:
       trafficRouting:
         nginx:
           stableIngress: my-app-ingress
+      analysis:
+        successfulRunHistoryLimit: 1    # Chỉ giữ lại 1 AnalysisRun thành công gần nhất
+        unsuccessfulRunHistoryLimit: 2  # Giữ lại 2 cái thất bại/inconclusive để còn debug
 
       # KHỐI STEPS ĐÃ ĐƯỢC THỤT LÙI VÀO TRONG CANARY:
       steps:
