@@ -191,7 +191,7 @@ def _action_to_traffic_signal(action: int, current_weight: float):
     if action == 0: return "increase-fast", min(100.0, current_weight + 10.0)
     if action == 1: return "increase-slow", min(100.0, current_weight + 5.0)
     if action == 2: return "hold", current_weight
-    if action == 3: return "decrease", max(0.0, current_weight - 5.0)
+    if action == 3: return "rollback", max(0.0, current_weight - 5.0)
     if action == 4: return "rollback", 0.0
     return "hold", current_weight
 
