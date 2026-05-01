@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: ai-agent
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:06409f8
+        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:7d2b404
         env:
         - name: SAFETY_GUARD_ENABLED
           value: "false"  # <--- Tắt lớp giáp bảo vệ tại đây

@@ -41,4 +41,4 @@ spec:
       successCondition: "result.decision == 'Successful'"
       failureCondition: "result.decision == 'Rollback'"
       # Thêm dòng này: Khi AI trả về "Running", Argo sẽ hiểu là "Chưa quyết định được, thử lại ở nhịp sau"
-      inconclusiveCondition: "result.decision == 'Rollback'"
+      inconclusiveCondition: "result.decision == 'Running'"
