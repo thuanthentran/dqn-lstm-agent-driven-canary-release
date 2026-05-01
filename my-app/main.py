@@ -63,12 +63,18 @@ async def root():
             noise = random.uniform(-0.1, 0.1)
             await asyncio.sleep(max(0, delay + base_jitter + noise))
 
-        # 5. Kịch bản: Critical Crash
+        # 5.1 Kịch bản: Critical Crash
         elif SCENARIO == "critical_crash":
             await asyncio.sleep(base_jitter)
             if random.random() < 0.5:
                 error_codes = [500, 502, 503, 504]
                 return Response(content="System Failure", status_code=random.choice(error_codes))
+        # 5.2 Kịch bản: Minimal Crash (Sát thủ thầm lặng - Lỗi dưới ngưỡng tĩnh)
+        elif SCENARIO == "minimal_crash":
+            await asyncio.sleep(base_jitter)
+            # Cố tình set tỉ lệ lỗi là 4%, vừa đủ để chui lọt qua khe cửa 5% của truyền thống
+            if random.random() < 0.04:
+                return Response(content="Minor Glitch", status_code=500)
 
         # 6. Kịch bản: CPU Spike
         elif SCENARIO == "cpu_spike":
@@ -76,21 +82,30 @@ async def root():
                 await asyncio.to_thread(cpu_intensive_task, 0.2) 
             await asyncio.sleep(base_jitter)
 
-        # 7. Kịch bản: Cascading Failure
+
+        # 7. Kịch bản: Cascading Failure (Sát thủ giấu mặt - Đề cao sức mạnh của LSTM)
         elif SCENARIO == "cascading_failure":
-            degradation_factor = min(uptime / 120.0, 1.0) 
+            # Kéo dài thời gian suy thoái lên 5 phút (300 giây) để AI có thời gian thu thập chuỗi dữ liệu (Sequence)
+            degradation_factor = min(uptime / 300.0, 1.0) 
             
+            # 1. CPU và RAM bắt đầu "rỉ máu" ngay từ đầu, nhưng rất âm thầm
             if random.random() < degradation_factor:
-                await asyncio.to_thread(cpu_intensive_task, 0.05)
+                await asyncio.to_thread(cpu_intensive_task, 0.02)
+                memory_leak_list.append(" " * 50 * 1024)
             
-            if random.random() < degradation_factor:
-                memory_leak_list.append(" " * 100 * 1024)
-            
-            latency_spike = degradation_factor * random.uniform(0.5, 2.5)
+            # 2. Latency tăng theo đường cong (Non-linear): Nhích rất chậm lúc đầu, vút lên lúc sau
+            ram_penalty = len(memory_leak_list) * 0.0002
+            # Giả lập nghẽn cổ chai: degradation_factor mũ 2 tạo ra đường cong dốc lên
+            latency_spike = (degradation_factor ** 2) * 2.0 + ram_penalty 
             await asyncio.sleep(base_jitter + latency_spike)
             
-            if random.random() < (degradation_factor * 0.4): 
-                return Response(content="Cascading Error", status_code=random.choice([500, 503, 504]))
+            # 3. ĐIỂM "ĂN TIỀN": Giam giữ Error Rate ở mức 0% trong 80% thời gian đầu!
+            # Ứng dụng vẫn gồng gánh trả về 200 OK dù rất chậm và tốn RAM.
+            if degradation_factor > 0.8:
+                # Chỉ khi hệ thống đã suy thoái cực độ (sau phút thứ 4), lỗi 5xx mới bùng phát
+                error_probability = (degradation_factor - 0.8) * 2.0  # Tăng tốc độ văng lỗi lên max 40%
+                if random.random() < error_probability: 
+                    return Response(content="Cascading Error", status_code=random.choice([500, 503, 504]))
 
         return {
             "version": VERSION,
