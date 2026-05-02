@@ -22,7 +22,7 @@ spec:
             - name: APP_SCENARIO
               value: "minimal_crash"
             - name: APP_VERSION
-              value: "v3.0.0"
+              value: "v3"
           ports:
             - name: http
               containerPort: 8080
