@@ -20,9 +20,9 @@ spec:
           image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:latest
           env:
             - name: APP_SCENARIO
-              value: "cpu_spike"
+              value: "latency_leak"
             - name: APP_VERSION
-              value: "v5.0.0"
+              value: "v2.0.0"
           ports:
             - name: http
               containerPort: 8080
