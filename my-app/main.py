@@ -73,7 +73,7 @@ async def root():
         elif SCENARIO == "minimal_crash":
             await asyncio.sleep(base_jitter)
             # Cố tình set tỉ lệ lỗi là 4%, vừa đủ để chui lọt qua khe cửa 5% của truyền thống
-            if random.random() < 0.04:
+            if random.random() < 0.1:
                 return Response(content="Minor Glitch", status_code=500)
 
         # 6. Kịch bản: CPU Spike
