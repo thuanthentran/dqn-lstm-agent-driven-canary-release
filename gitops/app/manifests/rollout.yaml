@@ -20,9 +20,9 @@ spec:
           image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/my-app:3e8cf2a
           env:
             - name: APP_SCENARIO
-              value: "critical_crash"
+              value: "cpu_spike"
             - name: APP_VERSION
-              value: "v3.0.0"
+              value: "v4.0.0"
           ports:
             - name: http
               containerPort: 8080
