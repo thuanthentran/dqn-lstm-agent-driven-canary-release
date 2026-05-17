@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rl-prod-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release.git
+    targetRevision: main
+    path: gitops/prod/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
