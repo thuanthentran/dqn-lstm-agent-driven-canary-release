@@ -9,6 +9,7 @@ import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import numpy as np
 import random
 import matplotlib.pyplot as plt
@@ -16,74 +17,52 @@ from collections import deque
  
 # Thêm đường dẫn để import từ thư mục core
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from core.model import DRQN
-from core.env import CanaryEnv, SCENARIO_NAMES, ACTION_NAMES, MAX_STEPS_PER_EPISODE
+from core.model import PPOTCNPolicy
+from core.env import CanaryEnv, SCENARIO_NAMES, ACTION_NAMES, MAX_STEPS_PER_EPISODE, SEQ_LEN
  
-# ---------------------------------------------------------------------------
-# Hyperparameters
-# ---------------------------------------------------------------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
- 
-SEQ_LENGTH   = 10          # Độ dài subsequence dùng cho BPTT
-BATCH_SIZE   = 32          # Số episode (sequence) mỗi lần optimize
-GAMMA        = 0.99
-LR           = 1e-4
- 
-EPS_START = 1.0
-EPS_END   = 0.05
-EPS_DECAY = float(os.getenv("EPS_DECAY", "0.999"))
- 
-TARGET_UPDATE     = 50
+
+# PPO hyperparameters
+SEQ_LENGTH = SEQ_LEN
+ROLLOUT_STEPS = int(os.environ.get("ROLLOUT_STEPS", "256"))
+PPO_EPOCHS = int(os.environ.get("PPO_EPOCHS", "2"))
+MINI_BATCH_SIZE = int(os.environ.get("MINI_BATCH_SIZE", "32"))
+GAMMA = float(os.environ.get("GAMMA", "0.99"))
+GAE_LAMBDA = float(os.environ.get("GAE_LAMBDA", "0.95"))
+CLIP_RATIO = float(os.environ.get("CLIP_RATIO", "0.2"))
+LR = float(os.environ.get("LR", "3e-4"))
+VALUE_COEF = float(os.environ.get("VALUE_COEF", "0.5"))
+ENTROPY_COEF = float(os.environ.get("ENTROPY_COEF", "0.01"))
+
 MOVING_AVG_WINDOW = int(os.getenv("MOVING_AVG_WINDOW", "100"))
-TRAIN_EPISODES    = int(os.getenv("TRAIN_EPISODES", "20000"))
- 
-# Buffer lưu tối đa 3 000 episode ≈ 60 000 transitions (avg 20 steps/ep)
-BUFFER_MAX_EPISODES = 3000
+TRAIN_UPDATES = int(os.getenv("TRAIN_UPDATES", "1000"))
  
  
 # ---------------------------------------------------------------------------
 # Episode-based Replay Buffer
 # ---------------------------------------------------------------------------
-class EpisodeReplayBuffer:
-    """
-    Lưu trữ các episode hoàn chỉnh thay vì transition riêng lẻ.
- 
-    Khi sample, trả về các *subsequence liên tiếp* độ dài SEQ_LENGTH từ
-    mỗi episode ngẫu nhiên — cho phép LSTM được train qua BPTT trên đúng
-    chuỗi thời gian, thay vì các transition độc lập.
- 
-    Mỗi transition trong buffer có dạng:
-        (state, action, reward, next_state, done)
-        np.ndarray(8,), int, float, np.ndarray(8,), float
-    """
- 
-    def __init__(self, maxlen: int = BUFFER_MAX_EPISODES):
-        self.buffer: deque[list] = deque(maxlen=maxlen)
- 
-    def add_episode(self, episode: list) -> None:
-        """
-        Thêm một episode vào buffer.
-        Episode ngắn hơn SEQ_LENGTH bị bỏ qua vì không thể tạo subsequence.
-        """
-        if len(episode) >= SEQ_LENGTH:
-            self.buffer.append(episode)
- 
-    def sample(self, batch_size: int) -> list[list]:
-        """
-        Sample batch_size subsequence liên tiếp độ dài SEQ_LENGTH.
-        Mỗi subsequence lấy từ một episode khác nhau (có thể trùng episode
-        nếu buffer nhỏ hơn batch_size).
-        """
-        k = min(batch_size, len(self.buffer))
-        episodes = random.sample(self.buffer, k)
-        sequences = []
-        for ep in episodes:
-            start = random.randint(0, len(ep) - SEQ_LENGTH)
-            sequences.append(ep[start : start + SEQ_LENGTH])
-        return sequences
- 
-    def __len__(self) -> int:
-        return len(self.buffer)
+class RolloutBuffer:
+    def __init__(self):
+        self.states = []
+        self.actions = []
+        self.log_probs = []
+        self.rewards = []
+        self.values = []
+        self.dones = []
+
+    def add(self, state, action, log_prob, reward, value, done):
+        self.states.append(state)
+        self.actions.append(action)
+        self.log_probs.append(log_prob)
+        self.rewards.append(reward)
+        self.values.append(value)
+        self.dones.append(done)
+
+    def clear(self):
+        self.__init__()
+
+    def __len__(self):
+        return len(self.states)
  
  
 # ---------------------------------------------------------------------------
@@ -91,192 +70,197 @@ class EpisodeReplayBuffer:
 # ---------------------------------------------------------------------------
 class Trainer:
     def __init__(self):
-        self.env        = CanaryEnv()
-        self.policy_net = DRQN().to(DEVICE)
-        self.target_net = DRQN().to(DEVICE)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.optimizer  = optim.Adam(self.policy_net.parameters(), lr=LR)
- 
-        # FIX 3: Buffer lưu theo episode, đủ ~60k transitions
-        self.memory  = EpisodeReplayBuffer(maxlen=BUFFER_MAX_EPISODES)
-        self.epsilon = EPS_START
- 
-        self.episode_rewards     = []
-        self.episode_epsilons    = []
-        self.moving_avg_rewards  = []
-        self.best_moving_avg     = float("-inf")
- 
-        # Create models directory with absolute path
-        self.models_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models"
-        )
+        self.env = CanaryEnv()
+        self.policy = PPOTCNPolicy(in_channels=5, seq_len=SEQ_LENGTH, action_dim=3).to(DEVICE)
+        self.optimizer = optim.Adam(self.policy.parameters(), lr=LR)
+
+        self.buffer = RolloutBuffer()
+
+        self.episode_rewards = []
+        self.moving_avg_rewards = []
+        self.best_moving_avg = float("-inf")
+
+        # models dir
+        self.models_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
         os.makedirs(self.models_dir, exist_ok=True)
  
-    # ------------------------------------------------------------------
-    # FIX 1: select_action nhận state đơn lẻ + hidden, trả về hidden mới
-    # ------------------------------------------------------------------
-    def select_action(self, state: np.ndarray, hidden=None):
-        """
-        Chọn action cho một timestep, duy trì LSTM hidden state xuyên suốt episode.
- 
-        Args:
-            state:  observation tại bước hiện tại, shape (8,)
-            hidden: tuple (h_n, c_n) từ bước trước, hoặc None ở đầu episode
- 
-        Returns:
-            action (int), new_hidden (tuple)
-        """
-        if random.random() < self.epsilon:
-            return self.env.action_space.sample(), hidden
- 
+    def select_action(self, state):
+        # state: np.ndarray (C, T)
+        state_t = torch.FloatTensor(state).unsqueeze(0).to(DEVICE)  # (1, C, T)
         with torch.no_grad():
-            # (1, 1, 8) — batch=1, seq_len=1
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).unsqueeze(0).to(DEVICE)
-            # return_all=False (mặc định): trả về shape (1, n_actions)
-            q_values, new_hidden = self.policy_net(state_tensor, hidden)
-            action = q_values.squeeze(0).max(0)[1].item()
+            logits, value = self.policy(state_t)
+            dist = torch.distributions.Categorical(logits=logits)
+            action = dist.sample()
+            log_prob = dist.log_prob(action)
+
+        return action.item(), log_prob.item(), value.item()
+
+    def _compute_gae(self, rewards, values, dones, next_value, gamma=GAMMA, lam=GAE_LAMBDA):
+        values = np.append(values, next_value)
+        gae = 0.0
+        advantages = np.zeros_like(rewards, dtype=np.float32)
+        for step in reversed(range(len(rewards))):
+            mask = 1.0 - float(dones[step])
+            delta = rewards[step] + gamma * values[step + 1] * mask - values[step]
+            gae = delta + gamma * lam * mask * gae
+            advantages[step] = gae
+        returns = advantages + values[:-1]
+        return advantages, returns
  
-        return action, new_hidden
- 
-    # ------------------------------------------------------------------
-    # FIX 2 + FIX 4: optimize_model dùng sequence + Double DQN
-    # ------------------------------------------------------------------
-    def optimize_model(self):
-        """
-        Train DRQN trên subsequence liên tiếp với Double DQN target.
- 
-        - Sequences liên tiếp: LSTM được train qua đúng thứ tự thời gian (BPTT).
-        - Double DQN: policy_net chọn next action, target_net ước lượng giá trị
-          → giảm overestimation bias so với vanilla DQN.
-        - hidden=None ở đầu mỗi sequence: chuẩn cho "random subsequence" DRQN.
-        """
-        if len(self.memory) < BATCH_SIZE:
-            return
- 
-        # Sample batch_size subsequences (mỗi cái dài SEQ_LENGTH)
-        sequences = self.memory.sample(BATCH_SIZE)
- 
-        # Xây dựng tensor từ list of sequences
-        # Mỗi sequence: list of SEQ_LENGTH tuple (s, a, r, s', done)
-        states      = torch.FloatTensor(
-            np.array([[t[0] for t in seq] for seq in sequences])
-        ).to(DEVICE)       # (B, T, 8)
- 
-        actions     = torch.LongTensor(
-            np.array([[t[1] for t in seq] for seq in sequences])
-        ).to(DEVICE)       # (B, T)
- 
-        rewards     = torch.FloatTensor(
-            np.array([[t[2] for t in seq] for seq in sequences])
-        ).to(DEVICE)       # (B, T)
- 
-        next_states = torch.FloatTensor(
-            np.array([[t[3] for t in seq] for seq in sequences])
-        ).to(DEVICE)       # (B, T, 8)
- 
-        dones       = torch.FloatTensor(
-            np.array([[t[4] for t in seq] for seq in sequences])
-        ).to(DEVICE)       # (B, T)
- 
-        # --- Current Q-values (cần gradient) ---
-        # hidden=None: reset hidden state ở đầu mỗi sequence (standard DRQN)
-        q_all, _ = self.policy_net(states, return_all=True)             # (B, T, n_actions)
-        curr_q = q_all.gather(2, actions.unsqueeze(2)).squeeze(2)       # (B, T)
- 
-        # --- Double DQN target (không cần gradient) ---
-        with torch.no_grad():
-            # policy_net chọn action tốt nhất tại next_state
-            next_q_policy, _ = self.policy_net(next_states, return_all=True)  # (B, T, n_actions)
-            # target_net ước lượng giá trị của action đó
-            next_q_target, _ = self.target_net(next_states, return_all=True)  # (B, T, n_actions)
- 
-        next_actions = next_q_policy.max(2)[1].unsqueeze(2)             # (B, T, 1)
-        next_q       = next_q_target.gather(2, next_actions).squeeze(2) # (B, T)
-        expected_q   = rewards + (1.0 - dones) * GAMMA * next_q        # (B, T)
- 
-        loss = nn.MSELoss()(curr_q, expected_q.detach())
-        self.optimizer.zero_grad()
-        loss.backward()
-        nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
-        self.optimizer.step()
- 
-    # ------------------------------------------------------------------
-    # Training loop
-    # ------------------------------------------------------------------
-    def train(self, episodes=8000, plot_path="logs/training_metrics.png"):
-        episodes = int(os.getenv("TRAIN_EPISODES", str(episodes)))
+    def ppo_update(self, advantages, returns):
+        # Convert storage to tensors
+        states = torch.stack([torch.FloatTensor(s) for s in self.buffer.states]).to(DEVICE)  # (N, C, T)
+        actions = torch.LongTensor(self.buffer.actions).to(DEVICE)
+        old_log_probs = torch.FloatTensor(self.buffer.log_probs).to(DEVICE)
+        advantages = torch.FloatTensor(advantages).to(DEVICE)
+        returns = torch.FloatTensor(returns).to(DEVICE)
+
+        N = states.size(0)
+        inds = np.arange(N)
+        for _ in range(PPO_EPOCHS):
+            np.random.shuffle(inds)
+            for start in range(0, N, MINI_BATCH_SIZE):
+                mb_inds = inds[start : start + MINI_BATCH_SIZE]
+                mb_states = states[mb_inds]
+                mb_actions = actions[mb_inds]
+                mb_old_logp = old_log_probs[mb_inds]
+                mb_adv = advantages[mb_inds]
+                mb_ret = returns[mb_inds]
+
+                logits, values = self.policy(mb_states)
+                dist = torch.distributions.Categorical(logits=logits)
+                entropy = dist.entropy().mean()
+                new_logp = dist.log_prob(mb_actions)
+
+                ratio = torch.exp(new_logp - mb_old_logp)
+                surr1 = ratio * mb_adv
+                surr2 = torch.clamp(ratio, 1.0 - CLIP_RATIO, 1.0 + CLIP_RATIO) * mb_adv
+                actor_loss = -torch.min(surr1, surr2).mean()
+
+                value_loss = F.mse_loss(values, mb_ret)
+
+                loss = actor_loss + VALUE_COEF * value_loss - ENTROPY_COEF * entropy
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.policy.parameters(), 0.5)
+                self.optimizer.step()
+
+    def train(self):
         os.makedirs("logs", exist_ok=True)
- 
-        print(f"--- Bắt đầu huấn luyện trên {DEVICE} ---")
- 
-        for ep in range(episodes):
+        print(f"--- Starting PPO training on {DEVICE} ---")
+
+        update = 0
+        while update < TRAIN_UPDATES:
+            # Collect rollouts
+            self.buffer.clear()
+            timesteps_collected = 0
+            ep_rewards = []
+            ep_reward = 0.0
+            ep_action_traces = []
+            ep_scenarios = []
+            current_episode_actions = []
+
             state, _ = self.env.reset()
- 
-            # FIX 1: Reset hidden state ở đầu mỗi episode
-            hidden          = None
-            current_episode = []   # FIX 2: thu thập transitions theo episode
-            total_reward    = 0
-            action_trace    = []
- 
-            # FIX 5: dùng MAX_STEPS_PER_EPISODE từ env thay vì hardcode 100
-            for _ in range(MAX_STEPS_PER_EPISODE + 10):  # +10 safety margin
-                action, hidden = self.select_action(state, hidden)
-                action_trace.append(ACTION_NAMES.get(action, f"Act{action}"))
- 
+            while timesteps_collected < ROLLOUT_STEPS:
+                action, logp, value = self.select_action(state)
                 next_state, reward, done, _, _ = self.env.step(action)
- 
-                # Lưu transition: done ép sang float để dùng trong tensor
-                current_episode.append(
-                    (state, action, reward, next_state, float(done))
-                )
- 
-                state         = next_state
-                total_reward += reward
- 
+
+                # record action for current episode trace
+                current_episode_actions.append(int(action))
+
+                self.buffer.add(state, action, logp, reward, value, float(done))
+
+                state = next_state
+                ep_reward += reward
+                timesteps_collected += 1
+
                 if done:
+                    # capture scenario before reset
+                    ep_rewards.append(ep_reward)
+                    ep_action_traces.append(list(current_episode_actions))
+                    ep_scenarios.append(int(self.env.scenario))
+                    current_episode_actions = []
+                    ep_reward = 0.0
+                    state, _ = self.env.reset()
+
+            # compute last value for bootstrapping
+            with torch.no_grad():
+                last_state_t = torch.FloatTensor(state).unsqueeze(0).to(DEVICE)
+                _, last_value = self.policy(last_state_t)
+                next_value = last_value.item()
+
+            # Gather arrays
+            rewards = np.array(self.buffer.rewards, dtype=np.float32)
+            values = np.array(self.buffer.values, dtype=np.float32)
+            dones = np.array(self.buffer.dones, dtype=np.float32)
+
+            # --- Diagnostics: action distribution, average logprob/value ---
+            if len(self.buffer.actions) > 0:
+                action_counts = np.bincount(np.array(self.buffer.actions, dtype=np.int64), minlength=self.policy.action_dim)
+                avg_logp = float(np.mean(self.buffer.log_probs))
+                avg_value = float(np.mean(self.buffer.values))
+            else:
+                action_counts = np.zeros(self.policy.action_dim, dtype=int)
+                avg_logp = 0.0
+                avg_value = 0.0
+
+            # Save a small sample of episode traces to a file for inspection and print to console
+            os.makedirs("logs", exist_ok=True)
+            sample_path = os.path.join("logs", f"actions_update_{update+1}.txt")
+            output_lines = []
+            output_lines.append(f"=== Update {update+1} action traces ===")
+            output_lines.append(f"Collected steps: {len(self.buffer.actions)}")
+            output_lines.append(f"Action counts: {action_counts.tolist()}")
+            output_lines.append(f"Avg log_prob: {avg_logp:.4f}, Avg value: {avg_value:.4f}\n")
+            for i, (rew, trace, scen) in enumerate(zip(ep_rewards, ep_action_traces, ep_scenarios)):
+                if i >= 50:
                     break
- 
-            # Nạp episode vào buffer (bị bỏ qua nếu quá ngắn)
-            self.memory.add_episode(current_episode)
-            self.optimize_model()
- 
-            # Cập nhật epsilon
-            self.epsilon = max(EPS_END, self.epsilon * EPS_DECAY)
+                output_lines.append(f"EP{i+1}: Scenario={SCENARIO_NAMES.get(scen,'?')}, Reward={rew:.3f}, Actions={trace}")
+
+            # Print to console
+            print("\n".join(output_lines))
+
+            # Also persist to file for later inspection
+            try:
+                with open(sample_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(output_lines))
+            except Exception:
+                pass
+
+            advantages, returns = self._compute_gae(rewards, values, dones, next_value)
+            # normalize advantages
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            # PPO update
+            self.ppo_update(advantages, returns)
+
+            # Logging
+            if len(ep_rewards) > 0:
+                total_reward = float(np.mean(ep_rewards))
+            else:
+                total_reward = 0.0
             self.episode_rewards.append(total_reward)
-            self.episode_epsilons.append(self.epsilon)
- 
-            window_start       = max(0, len(self.episode_rewards) - MOVING_AVG_WINDOW)
-            moving_avg_reward  = float(np.mean(self.episode_rewards[window_start:]))
+            window_start = max(0, len(self.episode_rewards) - MOVING_AVG_WINDOW)
+            moving_avg_reward = float(np.mean(self.episode_rewards[window_start:]))
             self.moving_avg_rewards.append(moving_avg_reward)
- 
+
             if moving_avg_reward > self.best_moving_avg:
                 self.best_moving_avg = moving_avg_reward
-                best_model_path = os.path.join(self.models_dir, "model_canary_drqn_best.pth")
-                torch.save(self.policy_net.state_dict(), best_model_path)
- 
-            if ep % TARGET_UPDATE == 0:
-                self.target_net.load_state_dict(self.policy_net.state_dict())
- 
-            if (ep + 1) % 10 == 0:
+                best_model_path = os.path.join(self.models_dir, "model_canary_ppo_tcn_best.pth")
+                torch.save(self.policy.state_dict(), best_model_path)
+
+            update += 1
+            if update % 1 == 0:
                 scenario_name = SCENARIO_NAMES.get(self.env.scenario, "Unknown")
-                action_seq    = " -> ".join(action_trace)
                 print(
-                    f"[{ep + 1:5d}/{episodes}] "
-                    f"Reward={total_reward:8.2f} | "
-                    f"MA{MOVING_AVG_WINDOW}={moving_avg_reward:8.2f} | "
-                    f"BestMA={self.best_moving_avg:8.2f} | "
-                    f"Scenario={scenario_name:<15} | "
-                    f"Steps={len(action_trace):2d} | "
-                    f"Eps={self.epsilon:.3f} | "
-                    f"Buf={len(self.memory)}"
+                    f"[Update {update}/{TRAIN_UPDATES}] MeanEpReward={total_reward:.3f} MA{MOVING_AVG_WINDOW}={moving_avg_reward:.3f} "
+                    f"Scenario={scenario_name} | Actions={action_counts.tolist()} | AvgLogP={avg_logp:.4f} | AvgV={avg_value:.4f} | TracesSaved={sample_path}"
                 )
-                print(f"  Actions: {action_seq}")
- 
-        torch.save(
-            self.policy_net.state_dict(),
-            os.path.join(self.models_dir, "model_canary_drqn.pth")
-        )
-        self.plot_training_metrics(plot_path)
+
+        # final save
+        torch.save(self.policy.state_dict(), os.path.join(self.models_dir, "model_canary_ppo_tcn_final.pth"))
+        self.plot_training_metrics("logs/training_metrics.png")
  
     def plot_training_metrics(self, output_path):
         plt.figure(figsize=(12, 8))
@@ -290,8 +274,8 @@ class Trainer:
         plt.title("Training Reward Progress")
         plt.legend()
         plt.subplot(2, 1, 2)
-        plt.plot(self.episode_epsilons, color='green', label="Epsilon")
-        plt.title("Exploration Rate (Epsilon)")
+        plt.plot(self.moving_avg_rewards, color='green', label="MovingAvg")
+        plt.title("Moving Average Reward")
         plt.legend()
         plt.tight_layout()
         plt.savefig(output_path)
@@ -300,4 +284,5 @@ class Trainer:
  
 if __name__ == "__main__":
     trainer = Trainer()
-    trainer.train(episodes=TRAIN_EPISODES)
+    trainer.train()
+    trainer.train()
