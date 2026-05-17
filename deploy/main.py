@@ -10,34 +10,22 @@ import torch.nn as nn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from core.feature_pipeline import RAW_KEYS, STATE_KEYS, RunningFeatureStats, normalize_raw_metrics, to_state_vector
+# Lấy trực tiếp hàm chuẩn hóa từ pipeline
+from core.feature_pipeline import RAW_KEYS, STATE_KEYS, RunningFeatureStats, normalize_raw_metrics
+# Import mô hình PPO+TCN thay cho DRQN
+from core.model import PPOTCNPolicy
 
-# --- 1. KIẾN TRÚC MÔ HÌNH (DRQN) ---
-class DRQN(nn.Module):
-    def __init__(self, n_obs=8, n_actions=5):
-        super(DRQN, self).__init__()
-        self.fc1 = nn.Linear(n_obs, 64) 
-        self.lstm = nn.LSTM(64, 128, batch_first=True) 
-        self.fc2 = nn.Linear(128, n_actions) 
-
-    def forward(self, x, hidden=None):
-        x = torch.relu(self.fc1(x))
-        x, hidden = self.lstm(x, hidden)
-        x = self.fc2(x[:, -1, :]) 
-        return x, hidden
-
-# --- 2. CẤU HÌNH HỆ THỐNG ---
-MODEL_PATH = os.getenv("MODEL_PATH", "models/model_canary_drqn_best.pth")
-SEQ_LENGTH = 10
+# --- 1. CẤU HÌNH HỆ THỐNG ---
+MODEL_PATH = os.getenv("MODEL_PATH", "models/model_canary_ppo_tcn_best.pth")
+SEQ_LENGTH = int(os.getenv("SEQ_LEN", "30")) # Tăng lên 30 theo kiến trúc mới
 DEVICE = torch.device("cpu")
 PROMETHEUS_URL = os.getenv(
     "PROMETHEUS_URL",
     "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090",
 )
-PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "30s")
-PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", "300"))
+PROM_QUERY_STEP = os.getenv("PROM_QUERY_STEP", "15s") # Nên query khít hơn để có đủ 30 điểm
+PROM_QUERY_WINDOW_SECONDS = int(os.getenv("PROM_QUERY_WINDOW_SECONDS", str(SEQ_LENGTH * 15))) 
 PROM_QUERY_TIMEOUT_SECONDS = float(os.getenv("PROM_QUERY_TIMEOUT_SECONDS", "5"))
-FEATURE_STATS_LOG_EVERY = int(os.getenv("FEATURE_STATS_LOG_EVERY", "20"))
 SAFETY_GUARD_ENABLED = os.getenv("SAFETY_GUARD_ENABLED", "true").lower() == "true"
 SAFETY_MIN_RPS = float(os.getenv("SAFETY_MIN_RPS", "3.0"))
 SAFETY_RUNNING_ERROR_RATIO = float(os.getenv("SAFETY_RUNNING_ERROR_RATIO", "1.8"))
@@ -55,17 +43,15 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("ai-agent")
-raw_feature_stats = RunningFeatureStats(RAW_KEYS)
-state_feature_stats = RunningFeatureStats(STATE_KEYS)
-feature_stats_updates = 0
 
 logger.info(
     "service_boot mode=init model_path=%s prom_url=%s step=%s window_sec=%d seq_length=%d",
     MODEL_PATH, PROMETHEUS_URL, PROM_QUERY_STEP, PROM_QUERY_WINDOW_SECONDS, SEQ_LENGTH
 )
 
-# Load model đã huấn luyện
-model = DRQN(n_obs=8, n_actions=5).to(DEVICE)
+# --- 2. LOAD MÔ HÌNH PPO + TCN ---
+# Khởi tạo mô hình với 5 channels đầu vào và 3 actions đầu ra
+model = PPOTCNPolicy(in_channels=5, seq_len=SEQ_LENGTH, action_dim=3).to(DEVICE)
 MODEL_READY = False
 try:
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
@@ -87,11 +73,7 @@ class InferenceRequest(BaseModel):
     app_info: AppInfo
 
 async def _prom_query_range(
-    query: str,
-    start_ts: int,
-    end_ts: int,
-    step: str,
-    empty_as_zero: bool = False,
+    query: str, start_ts: int, end_ts: int, step: str, empty_as_zero: bool = False,
 ) -> List[float]:
     params = {"query": query, "start": start_ts, "end": end_ts, "step": step}
     query_started_at = time.perf_counter()
@@ -105,15 +87,11 @@ async def _prom_query_range(
         return []
 
     if payload.get("status") != "success":
-        logger.warning("prom_query status=api_error query='%s' response_status=%s", query, payload.get("status"))
         return []
 
     result = payload.get("data", {}).get("result", [])
     if not result:
-        if empty_as_zero:
-            return [0.0]
-        logger.debug("prom_query status=empty_result query='%s'", query)
-        return []
+        return [0.0] if empty_as_zero else []
 
     points = result[0].get("values", [])
     series = []
@@ -122,20 +100,13 @@ async def _prom_query_range(
             series.append(float(value))
         except (TypeError, ValueError):
             series.append(0.0)
-
-    logger.debug(
-        "prom_query status=success points=%d duration_ms=%.1f query='%s'",
-        len(series), (time.perf_counter() - query_started_at) * 1000.0, query
-    )
+            
     return series
 
 def _normalize_series(values: List[float], length: int, default: float = 0.0) -> List[float]:
     if not values: return [default] * length
     if len(values) >= length: return values[-length:]
     return [values[0]] * (length - len(values)) + values
-
-def _latest_value(values: List[float], default: float = 0.0) -> float:
-    return float(values[-1]) if values else default
 
 async def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[float]], bool, float, Dict[str, float], Dict[str, float], float]:
     build_started_at = time.perf_counter()
@@ -159,7 +130,7 @@ async def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[f
     (e_canary, e_stable, l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps) = results
 
     data_complete = all(series for series in (l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps))
-    latest_canary_rps = _latest_value(canary_rps)
+    latest_canary_rps = float(canary_rps[-1]) if canary_rps else 0.0
 
     e_canary = _normalize_series(e_canary, SEQ_LENGTH)
     e_stable = _normalize_series(e_stable, SEQ_LENGTH)
@@ -170,29 +141,38 @@ async def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[f
     rps = _normalize_series(rps, SEQ_LENGTH)
 
     observed_weight = float(app_info.weight)
-    history, latest_raw, latest_state = [], {}, {}
+    
+    # Tạo Matrix (5, SEQ_LENGTH) cho CNN
+    ch_cpu, ch_mem, ch_lat, ch_err, ch_traffic = [], [], [], [], []
+    latest_raw, latest_state = {}, {}
 
     for i in range(SEQ_LENGTH):
         raw = {
             "weight_pct": observed_weight, "e_canary": e_canary[i], "e_stable": e_stable[i],
             "l_canary": l_canary[i], "l_stable": l_stable[i], "cpu": cpu[i], "mem_mb": mem[i], "rps": rps[i],
         }
-        history.append(to_state_vector(raw))
+        norm = normalize_raw_metrics(raw)
+        
+        # Đẩy vào 5 Channels
+        ch_cpu.append(norm.get("cpu_n", 0.0))
+        ch_mem.append(norm.get("mem_n", 0.0))
+        ch_lat.append(norm.get("l_ratio_n", 0.0))
+        ch_err.append(norm.get("e_ratio_n", 0.0))
+        ch_traffic.append(norm.get("weight_n", 0.0))
+        
         if i == SEQ_LENGTH - 1:
-            latest_raw, latest_state = raw, normalize_raw_metrics(raw)
+            latest_raw, latest_state = raw, norm
 
-    logger.info(
-        "history_build app=%s target_weight=%.1f data_complete=%s duration_ms=%.1f metrics_raw=%s metrics_norm=%s",
-        app_info.name, observed_weight, data_complete, (time.perf_counter() - build_started_at) * 1000.0, latest_raw, latest_state
-    )
-    return history, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps
+    # Data shape cuối cùng: (5 channels, 30 timesteps)
+    data = [ch_cpu, ch_mem, ch_lat, ch_err, ch_traffic]
+
+    logger.info("history_build app=%s target_weight=%.1f data_complete=%s duration_ms=%.1f", app_info.name, observed_weight, data_complete, (time.perf_counter() - build_started_at) * 1000.0)
+    return data, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps
 
 def _action_to_traffic_signal(action: int, current_weight: float):
-    if action == 0: return "increase-fast", min(100.0, current_weight + 10.0)
-    if action == 1: return "increase-slow", min(100.0, current_weight + 5.0)
-    if action == 2: return "hold", current_weight
-    if action == 3: return "rollback", 0.0
-    if action == 4: return "rollback", 0.0
+    if action == 0: return "hold", current_weight
+    if action == 1: return "promote", current_weight
+    if action == 2: return "rollback", 0.0
     return "hold", current_weight
 
 def _evaluate_safety_guard(latest_raw: Dict[str, float], observed_weight: float) -> Tuple[str, str]:
@@ -223,47 +203,42 @@ async def predict(request: InferenceRequest):
     started_at = time.perf_counter()
     app_name, weight = request.app_info.name, float(request.app_info.weight)
 
-    logger.info("predict_start app=%s target_weight=%.1f", app_name, weight)
-
     if not MODEL_READY:
-        logger.error("predict_abort app=%s reason=model_not_ready", app_name)
         raise HTTPException(status_code=503, detail="Model is not ready")
 
     try:
         data, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps = await _build_history_from_prometheus(request.app_info)
     except Exception as exc:
-        logger.exception("predict_abort app=%s reason=history_build_failed error='%s'", app_name, exc)
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
 
-    # --- CHỐT CHẶN DEAD POD ---
+    # CHỐT CHẶN DEAD POD (Không có traffic vào canary)
     if observed_weight > 0 and latest_canary_rps == 0.0:
-        logger.warning("predict_decision app=%s target_weight=%.1f decision=Rollback reason='canary_dead_no_metrics'", app_name, weight)
         return {
-            "action_id": 4, "decision": "Rollback", "confidence": 1.0, "traffic_signal": "rollback",
+            "action_id": 2, "decision": "Rollback", "confidence": 1.0, "traffic_signal": "rollback",
             "suggested_weight": 0.0, "latency_ms": (time.perf_counter() - started_at) * 1000.0,
         }
 
-    # --- CHỐT CHẶN THIẾU DATA ---
+    # CHỐT CHẶN THIẾU DATA (Báo Running để K8s chờ thêm)
     if not data_complete:
-        logger.info("predict_decision app=%s target_weight=%.1f decision=Running reason='insufficient_data'", app_name, weight)
         return {
-            "action_id": -1, "decision": "Running", "confidence": 0.0, "traffic_signal": "hold",
+            "action_id": 0, "decision": "Running", "confidence": 0.0, "traffic_signal": "hold",
             "suggested_weight": observed_weight, "latency_ms": (time.perf_counter() - started_at) * 1000.0,
         }
 
-    # --- AI INFERENCE ---
-    input_tensor = torch.FloatTensor([data]).to(DEVICE)
+    # --- AI INFERENCE (PPO + TCN) ---
+    input_tensor = torch.FloatTensor([data]).to(DEVICE) # Shape: (1, 5, 30)
     with torch.no_grad():
-        q_values, _ = model(input_tensor)
-        action = torch.argmax(q_values).item()
+        logits, value = model(input_tensor)
+        action = torch.argmax(logits, dim=-1).item()
     
-    q_values_list = [round(float(v), 2) for v in q_values.squeeze(0).tolist()]
-    confidence = float(torch.softmax(q_values, dim=1).max())
+    # Tính độ tự tin (Softmax)
+    confidence = float(torch.softmax(logits, dim=-1).max())
     
-    action_mapping = {0: "Successful", 1: "Successful", 2: "Running", 3: "Rollback", 4: "Rollback"}
+    # MAP ACTION TỪ 0, 1, 2 SANG QUYẾT ĐỊNH CỦA ARGO ROLLOUTS
+    action_mapping = {0: "Running", 1: "Successful", 2: "Rollback"}
     model_decision = action_mapping.get(action, "Running")
     
-    logger.info("model_inference app=%s q_values=%s chosen_action=%d model_decision=%s confidence=%.3f", app_name, q_values_list, action, model_decision, confidence)
+    logger.info("inference app=%s action=%d decision=%s confidence=%.3f value=%.3f", app_name, action, model_decision, confidence, value.item())
 
     # --- TÍNH TOÁN QUYẾT ĐỊNH CUỐI CÙNG VỚI SAFETY GUARD ---
     final_decision = model_decision
@@ -274,15 +249,10 @@ async def predict(request: InferenceRequest):
     if guard_decision:
         final_decision = guard_decision
         reason = f"safety_guard_override ({guard_reason})"
-        logger.warning("safety_override app=%s target_weight=%.1f model_wanted=%s guard_forced=%s reason='%s'", app_name, weight, model_decision, final_decision, guard_reason)
+        logger.warning("safety_override app=%s model_wanted=%s guard_forced=%s reason='%s'", app_name, model_decision, final_decision, guard_reason)
 
     traffic_signal, suggested_weight = _action_to_traffic_signal(action, observed_weight)
 
-    logger.info(
-        "predict_finish app=%s target_weight=%.1f final_decision=%s action_id=%d signal=%s latency_ms=%.1f reason='%s'",
-        app_name, weight, final_decision, action, traffic_signal, (time.perf_counter() - started_at) * 1000.0, reason
-    )
-    
     return {
         "action_id": action,
         "decision": final_decision,

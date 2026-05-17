@@ -17,15 +17,15 @@ spec:
         app: canary-ai-agent
     spec:
       containers:
-      - name: ai-agent
-        image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:7d2b404
-        env:
-        - name: SAFETY_GUARD_ENABLED
-          value: "false"  # <--- Tắt lớp giáp bảo vệ tại đây
-        - name: MODEL_PATH
-          value: models/model_canary_drqn_best.pth
-        - name: PROMETHEUS_URL
-          value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+        - name: ai-agent
+          image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:7d2b404 # (Bạn nhớ build lại image chứa code PPO mới nhé)
+          env:
+          - name: SAFETY_GUARD_ENABLED
+            value: "true"  # <--- BẬT LÊN: Đã ra thực chiến là phải có khiên!
+          - name: MODEL_PATH
+            value: models/model_canary_ppo_tcn_best.pth # <--- ĐỔI TỪ DRQN SANG PPO_TCN
+          - name: PROMETHEUS_URL
+            value: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
 ---
 apiVersion: v1
 kind: Service
