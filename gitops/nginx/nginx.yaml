@@ -6,23 +6,21 @@ metadata:
 spec:
   project: default
   source:
-    # Tương ứng với --repo https://kubernetes.github.io/ingress-nginx
     repoURL: https://kubernetes.github.io/ingress-nginx
     chart: ingress-nginx
-    targetRevision: 4.11.3 # Bạn nên chốt một phiên bản cụ thể để ổn định
+    targetRevision: 4.11.3 
     helm:
       values: |
         controller:
+          allowSnippetAnnotations: true # <--- Thêm dòng này để mở khóa tính năng Snippet
           service:
             type: NodePort
   destination:
     server: https://kubernetes.default.svc
-    # Tương ứng với --namespace ingress-nginx
     namespace: ingress-nginx
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      # Tương ứng với --create-namespace
       - CreateNamespace=true
