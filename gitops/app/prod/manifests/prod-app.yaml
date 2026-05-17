@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release.git
     targetRevision: main
-    path: gitops/prod/manifests
+    path: gitops/app/prod/manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: prod
