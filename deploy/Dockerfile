@@ -8,7 +8,7 @@ WORKDIR /app
 COPY deploy/requirements.txt .
 
 # 2. Cài đặt các thư viện (Sử dụng --index-url để lấy bản CPU cho nhẹ nếu không cần GPU)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 # 3. Copy thư mục core (chứa env.py và model.py)
 # Điều này cực kỳ quan trọng để lệnh 'from core.model import DRQN' hoạt động
