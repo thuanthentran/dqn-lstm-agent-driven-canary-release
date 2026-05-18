@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: ai-agent
-          image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:bc33225 # (Bạn nhớ build lại image chứa code PPO mới nhé)
+          image: ghcr.io/thuanthentran/dqn-lstm-agent-driven-canary-release/canary-ai-service:2174353 # (Bạn nhớ build lại image chứa code PPO mới nhé)
           env:
           - name: SAFETY_GUARD_ENABLED
             value: "true"  # <--- BẬT LÊN: Đã ra thực chiến là phải có khiên!
