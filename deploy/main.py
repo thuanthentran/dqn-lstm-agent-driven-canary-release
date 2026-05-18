@@ -147,8 +147,10 @@ async def _build_history_from_prometheus(app_info: AppInfo) -> Tuple[List[List[f
     latest_raw, latest_state = {}, {}
 
     for i in range(SEQ_LENGTH):
+        safe_e_canary = max(e_canary[i], 0.001)
+        safe_e_stable = max(e_stable[i], 0.001)
         raw = {
-            "weight_pct": observed_weight, "e_canary": e_canary[i], "e_stable": e_stable[i],
+            "weight_pct": observed_weight, "e_canary": safe_e_canary, "e_stable": safe_e_stable,
             "l_canary": l_canary[i], "l_stable": l_stable[i], "cpu": cpu[i], "mem_mb": mem[i], "rps": rps[i],
         }
         norm = normalize_raw_metrics(raw)
