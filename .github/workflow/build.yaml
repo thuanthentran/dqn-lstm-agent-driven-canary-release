@@ -2,14 +2,16 @@ name: Build All Microservices
 
 on:
   push:
-    branches: [ "OffTrain" ]
+    branches: 
+      - OffTrain
+  workflow_dispatch: # Thêm cái này để test tay
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [checkoutservice] # Thêm các service vào đây
+        service: [checkoutservice]
     steps:
       - uses: actions/checkout@v3
 
@@ -24,4 +26,4 @@ jobs:
         with:
           context: ./services/${{ matrix.service }}
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest  
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
