@@ -35,6 +35,6 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
-          context: ./services/${{ matrix.service }}
+          context: ./services/src/${{ matrix.service }}
           push: true
           tags: ${{ steps.prep.outputs.image_name }}:latest
