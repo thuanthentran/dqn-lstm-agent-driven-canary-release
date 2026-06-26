@@ -40,9 +40,9 @@ spec:
       stableService: {{ .Values.serviceName }}-stable
       
       # Chỉ lưu lại lịch sử Analysis để dọn dẹp cụm K8s
-      analysis:
-        successfulRunHistoryLimit: 1
-        unsuccessfulRunHistoryLimit: 2
+      #analysis:
+      #  successfulRunHistoryLimit: 1
+      #  unsuccessfulRunHistoryLimit: 2
         
       # Bàn giao quyền bẻ traffic cho Istio
       trafficRouting:
