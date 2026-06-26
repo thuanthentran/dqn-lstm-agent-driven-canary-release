@@ -6,11 +6,9 @@ import subprocess
 import time
 
 class OnlineCanaryEnv(gym.Env):
-    def __init__(self, service_name="checkoutservice", metrics_url="http://localhost:8000"):
-        super(OnlineCanaryEnv, self).__init__()
-        
+    def __init__(self, service_name, prometheus_url="http://prometheus-kube-prometheus-stack-prometheus.monitoring:9090"):
+        self.prometheus_url = prometheus_url
         self.service_name = service_name
-        self.metrics_url = metrics_url
         
         # Không gian hành động: 0 (Rollback), 1 (Promote)
         self.action_space = spaces.Discrete(2)
@@ -25,19 +23,20 @@ class OnlineCanaryEnv(gym.Env):
         self.current_step = 0
         self.max_steps = 10 # Số bước tối đa cho 1 đợt rollout
 
-    def _get_metrics_from_injector(self):
-        """Gọi HTTP sang Trụ cột 1 (FastAPI) để lấy số liệu mạng"""
+    def _get_metrics_from_prometheus(self):
+        # PromQL: Lấy error rate của service trong 1 phút qua
+        query = f'sum(rate(http_requests_total{{app="{self.service_name}", status=~"5.."}}[1m])) / sum(rate(http_requests_total{{app="{self.service_name}"}}[1m]))'
+        
+        response = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query})
+        result = response.json()
+        
+        # Xử lý kết quả trả về (parse json của prometheus)
         try:
-            response = requests.get(f"{self.metrics_url}/metrics/canary")
-            data = response.json()["data"]
-            return np.array([
-                data["cpu_usage_percent"],
-                data["error_rate"],
-                data["latency_ms"]
-            ], dtype=np.float32)
-        except Exception as e:
-            print(f"Lỗi kết nối tới Metrics Injector: {e}")
-            return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+            val = float(result['data']['result'][0]['value'][1])
+        except:
+            val = 0.0 # Nếu không có request nào, lỗi = 0
+            
+        return np.array([val], dtype=np.float32) # Trả về mảng quan sát
 
     def _execute_argo_command(self, action):
         """Dịch quyết định của PPO thành lệnh thật trên Kubernetes"""
