@@ -2,7 +2,7 @@ name: Build All Microservices
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "OffTrain" ]
 
 jobs:
   build:
