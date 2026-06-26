@@ -1,0 +1,9 @@
+serviceName: currencyservice
+replicas: 1
+image: us-central1-docker.pkg.dev/google-samples/microservices-demo/currencyservice:v0.10.5
+containerPort: 7000
+env:
+  - name: PORT
+    value: "7000"
+  - name: DISABLE_PROFILER
+    value: "1"

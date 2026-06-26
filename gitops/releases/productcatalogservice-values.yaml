@@ -1,0 +1,9 @@
+serviceName: productcatalogservice
+replicas: 1
+image: us-central1-docker.pkg.dev/google-samples/microservices-demo/productcatalogservice:v0.10.5
+containerPort: 3550
+env:
+  - name: PORT
+    value: "3550"
+  - name: DISABLE_PROFILER
+    value: "1"

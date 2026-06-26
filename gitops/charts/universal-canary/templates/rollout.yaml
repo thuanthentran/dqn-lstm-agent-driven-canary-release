@@ -1,0 +1,113 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  # Tên Rollout sẽ tự động lấy theo tên service (vd: paymentservice)
+  name: {{ .Values.serviceName }}
+  namespace: default
+spec:
+  # Mặc định chạy 2 replicas nếu không được khai báo trong values
+  replicas: {{ .Values.replicas | default 2 }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: {{ .Values.serviceName }}
+  
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.serviceName }}
+    spec:
+      containers:
+      - name: server
+        image: {{ .Values.image }}
+        ports:
+        - containerPort: {{ .Values.containerPort }}
+        
+        # [QUAN TRỌNG] Hỗ trợ khai báo biến môi trường linh hoạt
+        # (Google Microservices Demo dùng rất nhiều biến môi trường để gọi nhau)
+        {{- if .Values.env }}
+        env:
+        {{- range .Values.env }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+        {{- end }}
+
+  strategy:
+    canary:
+      # Hai service đóng vai trò "chốt chặn" cho Istio
+      canaryService: {{ .Values.serviceName }}-canary
+      stableService: {{ .Values.serviceName }}-stable
+      
+      # Chỉ lưu lại lịch sử Analysis để dọn dẹp cụm K8s
+      analysis:
+        successfulRunHistoryLimit: 1
+        unsuccessfulRunHistoryLimit: 2
+        
+      # Bàn giao quyền bẻ traffic cho Istio
+      trafficRouting:
+        istio:
+          virtualService:
+            name: {{ .Values.serviceName }}-vsvc
+            routes:
+            - primary-route
+          destinationRule:
+            name: {{ .Values.serviceName }}-dr
+            canarySubsetName: canary
+            stableSubsetName: stable
+            
+      # KỊCH BẢN PHÁT HÀNH (Steps) - Gọi tới PPO Agent
+      steps:
+      # --- BƯỚC 1: Thăm dò 20% ---
+      - setWeight: 20
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: target-weight
+            value: "20.0"  # Báo cho Agent biết % traffic mục tiêu
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+
+      # --- BƯỚC 2: Tăng tốc 50% ---
+      - setWeight: 50
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: target-weight
+            value: "50.0"
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+
+      # --- BƯỚC 3: Mở rộng 80% ---
+      - setWeight: 80
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: target-weight
+            value: "80.0"
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+              
+      # --- HOÀN THÀNH 100% ---
+      # (Sau bước 80%, nếu Agent trả về Action=1, Rollout sẽ tự động xả 100%)
