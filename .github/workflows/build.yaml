@@ -1,29 +1,40 @@
-name: Build All Microservices
+name: Build and Push All Microservices
 
 on:
   push:
-    branches: 
-      - OffTrain
-  workflow_dispatch: # Thêm cái này để test tay
+    branches: [ "OffTrain" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write  # BẮT BUỘC: Cấp quyền ghi vào Registry
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [checkoutservice]
+        service: [checkoutservice] # Thêm các service khác vào đây
     steps:
       - uses: actions/checkout@v3
 
-      - name: Login to DockerHub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # Dùng token mặc định của GitHub
+
+      - name: Prepare Image Name
+        id: prep
+        run: |
+          # GHCR yêu cầu tên image phải viết thường
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
           context: ./services/${{ matrix.service }}
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+          tags: ${{ steps.prep.outputs.image_name }}:latest
