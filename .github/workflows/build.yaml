@@ -1,4 +1,4 @@
-name: Build and Push All Microservices
+name: Build and Push Microservices
 
 on:
   push:
@@ -7,14 +7,35 @@ on:
 
 permissions:
   contents: read
-  packages: write  # BẮT BUỘC: Cấp quyền ghi vào Registry
+  packages: write
 
 jobs:
+  # Job này kiểm tra xem thư mục nào có thay đổi
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      # Xuất ra danh sách các service đã thay đổi
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            checkoutservice: 'services/src/checkoutservice/**'
+            # Thêm các service khác vào đây khi bạn phát triển thêm
+            # paymentservice: 'services/src/paymentservice/**'
+
+  # Job này chỉ chạy nếu có thay đổi
   build:
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' }} # Chỉ chạy nếu có thay đổi
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [checkoutservice] # Thêm các service khác vào đây
+        # Tự động tạo danh sách build dựa trên kết quả job 'changes'
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+    
     steps:
       - uses: actions/checkout@v3
 
@@ -23,12 +44,11 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} # Dùng token mặc định của GitHub
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare Image Name
         id: prep
         run: |
-          # GHCR yêu cầu tên image phải viết thường
           IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
           echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
 
