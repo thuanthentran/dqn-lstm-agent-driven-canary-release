@@ -2,7 +2,7 @@ name: Build All Microservices
 
 on:
   push:
-    branches: [ "OffTrain" ]
+    branches: [ "main" ]
 
 jobs:
   build:
@@ -24,4 +24,4 @@ jobs:
         with:
           context: ./services/${{ matrix.service }}
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest  
