@@ -23,7 +23,7 @@ jobs:
           filters: |
             # Định nghĩa các service tại đây
             adservice: 'services/src/adservice/**'
-            cartservice: 'services/src/cartservice/**'
+            cartservice: 'services/src/cartservice/src/**'
             checkoutservice: 'services/src/checkoutservice/**'
             currencyservice: 'services/src/currencyservice/**'
             emailservice: 'services/src/emailservice/**'
