@@ -50,3 +50,5 @@ services:
     # Loadgenerator trỏ vào chart riêng của nó
     chartPath: gitops/charts/loadgenerator
     valueFile: ../../releases/loadgenerator-values.yaml
+  - name: base-resources
+    chartPath: gitops/base
