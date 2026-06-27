@@ -19,6 +19,11 @@ spec:
       valueFiles:
         - {{ .valueFile | quote }}
     {{- end }}
+  ignoreDifferences:
+  - group: networking.istio.io
+    kind: VirtualService
+    jsonPointers:
+    - /spec/http/0/fault  # ArgoCD sẽ bỏ qua mọi thay đổi do Python Patch vào đây
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: {{ $.Values.global.destinationNamespace | quote }}
