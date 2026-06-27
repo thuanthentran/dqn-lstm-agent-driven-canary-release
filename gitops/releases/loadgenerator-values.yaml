@@ -3,7 +3,7 @@ users: "15" # Tăng nhẹ lượng traffic ban đầu để sinh số liệu ổ
 
 frontend:
   host: "frontend.default.svc.cluster.local" # Trỏ full đường định danh mạng nội bộ K8s
-  port: 80
+  port: 8080
 
 resources:
   requests:
