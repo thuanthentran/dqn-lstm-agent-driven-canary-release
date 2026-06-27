@@ -1,0 +1,42 @@
+global:
+  # Thay đường dẫn này bằng URL repository Git thật của bạn
+  repoURL: 'https://github.com/thuanthentran/k3s-gitops.git'
+  targetRevision: HEAD
+  destinationNamespace: default
+
+# Danh sách 11 dịch vụ cần đồng bộ lên ArgoCD
+services:
+  - name: adservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/adservice-values.yaml
+  - name: cartservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/cartservice-values.yaml
+  - name: checkoutservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/checkoutservice-values.yaml
+  - name: currencyservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/currencyservice-values.yaml
+  - name: emailservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/emailservice-values.yaml
+  - name: frontend
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/frontend-values.yaml
+  - name: paymentservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/paymentservice-values.yaml
+  - name: productcatalogservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/productcatalogservice-values.yaml
+  - name: recommendationservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/recommendationservice-values.yaml
+  - name: shippingservice
+    chartPath: charts/universal-canary
+    valueFile: ../../releases/shippingservice-values.yaml
+  # loadgenerator dùng chart riêng biệt vừa tạo ở bước trước
+  - name: loadgenerator
+    chartPath: charts/loadgenerator
+    valueFile: ../../releases/loadgenerator-values.yaml
