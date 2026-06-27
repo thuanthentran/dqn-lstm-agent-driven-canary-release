@@ -4,6 +4,8 @@ on:
   push:
     branches: [ "OffTrain" ]
   workflow_dispatch:
+  paths:
+      - 'services/src/**'
 
 permissions:
   contents: read
