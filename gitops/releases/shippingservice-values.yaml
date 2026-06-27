@@ -1,6 +1,6 @@
 serviceName: shippingservice
 replicas: 1
-image: us-central1-docker.pkg.dev/google-samples/microservices-demo/shippingservice:v0.10.5
+image: ghcr.io/thuanthentran/shippingservice:latest
 containerPort: 50051
 env:
   - name: PORT
