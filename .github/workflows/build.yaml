@@ -1,4 +1,4 @@
-name: Build and Push All Microservices
+name: Build and Push Microservices
 
 on:
   push:
@@ -7,28 +7,57 @@ on:
 
 permissions:
   contents: read
-  packages: write  # BẮT BUỘC: Cấp quyền ghi vào Registry
+  packages: write 
 
 jobs:
+  # Job 1: Tự động phát hiện service nào có thay đổi code
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            # Định nghĩa các service tại đây
+            adservice: 'services/src/adservice/**'
+            cartservice: 'services/src/cartservice/**'
+            checkoutservice: 'services/src/checkoutservice/**'
+            currencyservice: 'services/src/currencyservice/**'
+            emailservice: 'services/src/emailservice/**'
+            frontend: 'services/src/frontend/**'
+            loadgenerator: 'services/src/loadgenerator/**'
+            paymentservice: 'services/src/paymentservice/**'
+            productcatalogservice: 'services/src/productcatalogservice/**'
+            recommendationservice: 'services/src/recommendationservice/**'
+            shippingservice: 'services/src/shippingservice/**'
+
+  # Job 2: Build và Push song song các service đã thay đổi
   build:
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [adservice, cartservice, checkoutservice, currencyservice, emailservice, frontend, loadgenerator, paymentservice, productcatalogservice, recommendationservice, shippingservice] # Thêm các service khác vào đây
+        # Nhận danh sách các service cần build từ Job 'changes'
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+    
     steps:
       - uses: actions/checkout@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Login to GitHub Container Registry 
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} # Dùng token mặc định của GitHub
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare Image Name
         id: prep
         run: |
-          # GHCR yêu cầu tên image phải viết thường
+          # Ép tên image về chữ thường (bắt buộc của GHCR)
           IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
           echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
 
