@@ -22,3 +22,6 @@ env:
     value: "adservice:9555"
   - name: ENABLE_PROFILER
     value: "0"
+  - name: SHOPPING_ASSISTANT_SERVICE_ADDR
+    value: "dummy-shoppingassistant.default.svc.cluster.local:80"
+  
