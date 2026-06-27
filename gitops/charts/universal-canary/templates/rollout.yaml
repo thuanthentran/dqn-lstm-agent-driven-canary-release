@@ -60,54 +60,19 @@ spec:
       steps:
       # --- BƯỚC 1: Thăm dò 20% ---
       - setWeight: 20
-      - analysis:
-          templates:
-          - templateName: universal-rl-agent-eval
-          args:
-          - name: service-name
-            value: {{ .Values.serviceName }}
-          - name: target-weight
-            value: "20.0"  # Báo cho Agent biết % traffic mục tiêu
-          - name: stable-hash
-            valueFrom:
-              podTemplateHashValue: Stable
-          - name: canary-hash
-            valueFrom:
-              podTemplateHashValue: Latest
+      - pause: {}
+
 
       # --- BƯỚC 2: Tăng tốc 50% ---
       - setWeight: 50
-      - analysis:
-          templates:
-          - templateName: universal-rl-agent-eval
-          args:
-          - name: service-name
-            value: {{ .Values.serviceName }}
-          - name: target-weight
-            value: "50.0"
-          - name: stable-hash
-            valueFrom:
-              podTemplateHashValue: Stable
-          - name: canary-hash
-            valueFrom:
-              podTemplateHashValue: Latest
+      - pause: {}         
+
+
 
       # --- BƯỚC 3: Mở rộng 80% ---
       - setWeight: 80
-      - analysis:
-          templates:
-          - templateName: universal-rl-agent-eval
-          args:
-          - name: service-name
-            value: {{ .Values.serviceName }}
-          - name: target-weight
-            value: "80.0"
-          - name: stable-hash
-            valueFrom:
-              podTemplateHashValue: Stable
-          - name: canary-hash
-            valueFrom:
-              podTemplateHashValue: Latest
+      - pause: {}
+
               
       # --- HOÀN THÀNH 100% ---
       # (Sau bước 80%, nếu Agent trả về Action=1, Rollout sẽ tự động xả 100%)
