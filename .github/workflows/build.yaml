@@ -22,6 +22,9 @@ jobs:
         id: filter
         with:
           filters: |
+            # Định nghĩa các service tại đây
+            adservice: 'services/src/adservice/**'
+            cartservice: 'services/src/cartservice/src/**'
             checkoutservice: 'services/src/checkoutservice/**'
             # Thêm các service khác vào đây khi bạn phát triển thêm
             # paymentservice: 'services/src/paymentservice/**'
