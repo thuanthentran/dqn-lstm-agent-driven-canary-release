@@ -1,7 +1,7 @@
 global:
   # Thay đường dẫn này bằng URL repository Git thật của bạn
   repoURL: 'https://github.com/thuanthentran/k3s-gitops.git'
-  targetRevision: HEAD
+  targetRevision: OffTrain
   destinationNamespace: default
 
 # Danh sách 11 dịch vụ cần đồng bộ lên ArgoCD
