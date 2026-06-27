@@ -1,6 +1,6 @@
 serviceName: frontend
 replicas: 1
-image: us-central1-docker.pkg.dev/google-samples/microservices-demo/frontend:v0.10.5
+image: ghcr.io/thuanthentran/frontend:latest
 containerPort: 8080
 portName: http
 env:

@@ -1,6 +1,6 @@
 serviceName: recommendationservice
 replicas: 1
-image: us-central1-docker.pkg.dev/google-samples/microservices-demo/recommendationservice:v0.10.5
+image: ghcr.io/thuanthentran/recommendationservice:latest
 containerPort: 8080
 env:
   - name: PORT

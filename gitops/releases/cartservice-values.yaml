@@ -1,6 +1,6 @@
 serviceName: cartservice
 replicas: 1
-image: us-central1-docker.pkg.dev/google-samples/microservices-demo/cartservice:v0.10.5
+image: ghcr.io/thuanthentran/cartservice:latest
 containerPort: 7070
 env:
   - name: REDIS_ADDR
