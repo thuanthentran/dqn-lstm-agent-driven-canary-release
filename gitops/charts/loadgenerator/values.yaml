@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: gcr.io/google-samples/microservices-demo/loadgenerator
-  tag: v0.10.0
+  repository: ghcr.io/thuanthentran/loadgenerator
+  tag: latest
   pullPolicy: IfNotPresent
 
 # Cấu hình đích đến của luồng traffic
