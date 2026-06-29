@@ -36,7 +36,7 @@ ONLINE_SAVE_PATH = os.path.join(BASE_DIR, "models", "ppo_lstm_online_best")
 ONLINE_NORM_PATH = os.path.join(BASE_DIR, "models", "vec_normalize_online.pkl")
 
 # Chạy trên K8s thật tốn nhiều thời gian (vài giây/step), nên số step sẽ ít lại
-TOTAL_TIMESTEPS = 2000 
+TOTAL_TIMESTEPS = 1000
 FINE_TUNE_LR = 1e-5 # Learning rate siêu nhỏ để học chậm từ từ
 
 class MLflowCallback(BaseCallback):
@@ -49,6 +49,18 @@ class MLflowCallback(BaseCallback):
         if self.n_calls % self.log_freq == 0:
             for key, value in self.logger.name_to_value.items():
                 mlflow.log_metric(f"online_{key}", value, step=self.num_timesteps)
+        return True
+
+from stable_baselines3.common.callbacks import BaseCallback
+
+class DebugCallback(BaseCallback):
+    def __init__(self, verbose=0):
+        super(DebugCallback, self).__init__(verbose)
+    def _on_step(self) -> bool:
+        # In ra hành động cuối cùng mà Agent vừa thực hiện (nếu có thể lấy từ model)
+        # Log đơn giản:
+        if self.num_timesteps % 5 == 0:
+            print(f"📡 Step {self.num_timesteps}: Đang tiếp tục huấn luyện...")
         return True
 
 def configure_mlflow() -> None:
@@ -81,7 +93,9 @@ def train_online() -> None:
     print(f"🧠 Đang nạp bộ não (PPO+LSTM) từ: {OFFLINE_MODEL_PATH}")
     custom_objects = {
         "learning_rate": FINE_TUNE_LR,
-        "clip_range": 0.1 # Giảm biên độ update policy để tránh làm gãy não Agent vì độ trễ mạng
+        "clip_range": 0.1, # Giảm biên độ update policy để tránh làm gãy não Agent vì độ trễ mạng
+        "n_step": 64,
+        "batch_size": 32
     }
     model = RecurrentPPO.load(
         OFFLINE_MODEL_PATH, 
@@ -100,7 +114,7 @@ def train_online() -> None:
         # Bắt đầu vòng lặp tương tác với K3s
         model.learn(
             total_timesteps=TOTAL_TIMESTEPS, 
-            callback=mlflow_callback,
+            callback=[mlflow_callback, DebugCallback()],
             reset_num_timesteps=True 
         )
 
