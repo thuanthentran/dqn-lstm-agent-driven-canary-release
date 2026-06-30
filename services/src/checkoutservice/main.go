@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"time"
+	"math/rand"
 
 	"cloud.google.com/go/profiler"
 	"github.com/google/uuid"
@@ -229,7 +230,27 @@ func (cs *checkoutService) Watch(req *healthpb.HealthCheckRequest, ws healthpb.H
 
 func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (*pb.PlaceOrderResponse, error) {
 	log.Infof("[PlaceOrder] user_id=%q user_currency=%q", req.UserId, req.UserCurrency)
+	// =====================================================================
+	// 🐞 PATCH: MÔ PHỎNG BUG LOGIC TỪ BẢN RELEASE MỚI (DÀNH CHO AGENT HỌC)
+	// =====================================================================
+	// Kịch bản: 50% request sẽ bị treo từ 1 đến 3 giây, sau đó trả về mã lỗi 500.
+	// 50% request còn lại vẫn thành công để lừa hệ thống rằng "app vẫn sống".
+	if rand.Float32() < 0.50 {
+		log.Warnf("[BUG SIMULATION] Phát hiện request xui xẻo, kích hoạt lỗi...")
+		
+		// Giả lập xử lý chậm (nghẽn cổ chai) ngẫu nhiên 1 đến 3 giây
+		delay := time.Duration(rand.Intn(3)+1) * time.Second
+		time.Sleep(delay)
+		
+		// Trả về lỗi Internal (tương đương HTTP 500) và hủy request
+		return nil, status.Errorf(codes.Internal, "Lỗi giả lập: Dịch vụ không phản hồi do tính năng mới bị bug!")
+	}
+	// =====================================================================
 
+	orderID, err := uuid.NewUUID()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate order uuid")
+	}
 	orderID, err := uuid.NewUUID()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate order uuid")
