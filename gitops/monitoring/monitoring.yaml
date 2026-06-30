@@ -66,10 +66,6 @@ spec:
               istio-workload:
                 url: https://raw.githubusercontent.com/istio/istio/master/manifests/addons/dashboards/istio-workload-dashboard.json
 
-        alertmanager:
-          service:
-            type: NodePort
-
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
