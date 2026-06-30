@@ -21,10 +21,12 @@ spec:
       terminationGracePeriodSeconds: 5
       restartPolicy: Always
       initContainers:
-      # Init Container: Chặn không cho bộ tạo tải chạy bậy khi mạng lưới hoặc frontend chưa sẵn sàng
       - name: wait-for-frontend
         image: busybox:latest
-        command: ['sh', '-c', 'until nc -z {{ .Values.frontend.host }} {{ .Values.frontend.port }}; do echo "Waiting for frontend service to be ready..."; sleep 2; done;']
+        command: 
+          - sh
+          - -c
+          - 'until wget -q -O - http://{{ .Values.frontend.host }}:{{ .Values.frontend.port }} > /dev/null; do echo "Waiting for HTTP 200 from frontend..."; sleep 2; done;'
       containers:
       - name: main
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
