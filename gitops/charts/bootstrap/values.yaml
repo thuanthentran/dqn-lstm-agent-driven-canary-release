@@ -52,3 +52,5 @@ services:
     valueFile: ../../releases/loadgenerator-values.yaml
   - name: base-resources
     chartPath: gitops/base
+  - name: redis-cart
+    chartPath: gitops/base/redis-cart
