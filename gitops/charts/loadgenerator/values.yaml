@@ -11,7 +11,7 @@ frontend:
   port: 8080
 
 # Số lượng user giả lập đồng thời lướt web (bơm traffic)
-users: "50"
+users: "10"
 
 # Tích hợp Istio Service Mesh để thu thập metrics
 istio:
