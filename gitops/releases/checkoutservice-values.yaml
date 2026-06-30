@@ -1,10 +1,12 @@
 serviceName: checkoutservice
 replicas: 1
-image: ghcr.io/thuanthentran/checkoutservice@sha256:d3445ee34eb0cb6e5c62b3b7fddd88e0e896cc1098ca78f4144f4577343ad5e4
+image: ghcr.io/thuanthentran/checkoutservice:latest
 containerPort: 5050
 env:
   - name: PORT
     value: "5050"
+  - name: FAULT_SCENARIO
+    value: "none" # Mặc định là không có lỗi
   - name: PRODUCT_CATALOG_SERVICE_ADDR
     value: "productcatalogservice:3550"
   - name: SHIPPING_SERVICE_ADDR
