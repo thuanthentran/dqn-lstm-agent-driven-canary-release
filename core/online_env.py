@@ -7,344 +7,258 @@ import time
 import random
 from collections import deque
 import re
+import json
+import sys
+import tempfile
+import os
 
-# Định nghĩa các hằng số cấu hình lấy chính xác từ feature_pipeline.py
 EPSILON = 1e-6
 CPU_REF = 0.02
 MEM_REF_MB = 128.0
 MAX_RATIO = 5.0
 
+# --- BỘ MÀU SẮC THẨM MỸ (ANSI COLORS) ---
+class C:
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    GREY = '\033[90m'
+    BOLD = '\033[1m'
+    END = '\033[0m'
+
 class OnlineCanaryEnv(gym.Env):
-    """
-    Môi trường Live Canary trên cụm K3s thật sử dụng Istio & Prometheus.
-    Đáp ứng chuẩn ma trận (5, 30) và các kênh: [CPU, RAM, Latency, Error_Rate, Traffic_Pct]
-    """
     def __init__(self, service_list=None, prometheus_url="http://172.26.52.132:30090", seq_len=30):
         super().__init__()
         self.prometheus_url = prometheus_url
         self.seq_len = seq_len
         self.num_features = 5
-        
-        # Danh sách microservices ngẫu nhiên cho mỗi episode
-        self.service_list = service_list or ['frontend']
+        self.service_list = service_list or ['checkoutservice']
         self.current_service = None
-        
-        # 1. PATCH ĐỦ 3 HÀNH ĐỘNG: 0 = Hold, 1 = Promote, 2 = Rollback (Abort)
         self.action_space = spaces.Discrete(3)
-        
-        # 2. PATCH ĐỦ MATRIX KÍCH THƯỚC (5, 30) chuẩn hóa trong khoảng [0, 1]
-        self.observation_space = spaces.Box(
-            low=0.0,
-            high=1.0,
-            shape=(self.num_features, self.seq_len),
-            dtype=np.float32
-        )
-        
-        # Hàng đợi lưu giữ lịch sử trượt 30 timesteps giống offline
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.num_features, self.seq_len), dtype=np.float32)
         self.history = deque(maxlen=self.seq_len)
         self.current_step = 0
-        self.max_steps = 20  # Giới hạn số step tối đa cho một đợt rollout live
+        self.max_steps = 20  
 
-    def _query_prometheus(self, query):
-        try:
-            response = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query}, timeout=5)
-            result = response.json()
-            if result['status'] == 'success' and result['data']['result']:
-                val = float(result['data']['result'][0]['value'][1])
-                return val
-            # --- THÊM DÒNG NÀY ĐỂ DEBUG ---
-            else:
-                print(f"DEBUG: Query rỗng/lỗi: {query}") 
-                return 0.0
-        except Exception as e:
-            return 0.0
+    def _run_cmd(self, cmd, ignore_error=False):
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0 and not ignore_error:
+            print(f"\n{C.BOLD}{C.RED}❌ [FATAL ERROR] Lệnh hệ thống thất bại!{C.END}")
+            print(f"   {C.RED}Lệnh: {' '.join(cmd)}{C.END}")
+            print(f"   {C.RED}STDERR: {res.stderr.strip()}{C.END}")
+            sys.exit(1)
+        return res
+
+    def _wait_for_rollout_step(self, old_weight):
+        print(f"{C.GREY}   🔄 Đang chờ Argo rẽ traffic (Đang ở: {old_weight}%)...{C.END}")
+        for _ in range(40): 
+            current_weight = self._get_live_weight_pct()
+            if current_weight != old_weight:
+                print(f"{C.GREEN}   ✅ Đã rẽ traffic thành công lên: {current_weight}%{C.END}")
+                return
+            time.sleep(1)
+
+    def _apply_fault_to_rollout(self, svc_name, fault_value):
+        res = self._run_cmd(["kubectl", "get", "rollout", svc_name, "-n", "default", "-o", "json"])
+        rollout_data = json.loads(res.stdout)
+        
+        containers = rollout_data.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
+        for c in containers:
+            if c.get("name") in [svc_name, "server"]: 
+                env_list = c.get("env", [])
+                found = False
+                for e in env_list:
+                    if e.get("name") == "FAULT_SCENARIO":
+                        e["value"] = fault_value
+                        found = True
+                        break
+                if not found:
+                    env_list.append({"name": "FAULT_SCENARIO", "value": fault_value})
+                c["env"] = env_list
+                break
+
+        patch_obj = { "spec": { "template": { "metadata": { "annotations": { "rl-train-tick": str(int(time.time())) } }, "spec": { "containers": containers } } } }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(patch_obj, f)
+            temp_path = f.name
+            
+        self._run_cmd(["kubectl", "patch", f"rollout/{svc_name}", "-n", "default", "--type=merge", "--patch-file", temp_path])
+        os.remove(temp_path)
 
     def _get_live_weight_pct(self):
-        """Lấy phần trăm traffic bằng CLI Argo để tránh lỗi JSONPath trên Windows"""
         try:
-            cmd = ["argo-rollouts", "get", "rollout", self.current_service, "-n", "default"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            
-            # Dùng Regex quét tìm dòng "ActualWeight:  20"
+            res = self._run_cmd(["argo-rollouts", "get", "rollout", self.current_service, "-n", "default"])
             match = re.search(r'ActualWeight:\s+(\d+)', res.stdout)
-            if match:
-                return float(match.group(1))
+            if match: return float(match.group(1))
             return 0.0
-        except Exception as e:
-            print(f"Lỗi lấy weight: {e}")
+        except SystemExit:
+            raise
+        except Exception:
             return 0.0
-
-    def _debug_labels(self):
-        query = 'count(istio_requests_total) by (destination_service)'
-        # In ra 5 service đầu tiên tìm thấy
-        response = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query}).json()
-        print("\n🔍 DEBUG: Danh sách các Service Istio đang ghi nhận metrics:")
-        if 'data' in response and 'result' in response['data']:
-            for item in response['data']['result'][:5]:
-                print(f"   -> {item['metric'].get('destination_service')}")
 
     def _get_metrics_from_prometheus(self):
-        svc = self.current_service
-        canary_svc = f"{svc}-canary"
-        stable_svc = f"{svc}-stable"
-        ns = "default"
-
-        def get_val(query):
+        queries = {
+            "traffic": 'sum by (destination_workload) (rate(istio_requests_total{reporter="destination"}[30s]))',
+            "http_errors": 'sum by (destination_workload) (rate(istio_requests_total{reporter="destination", response_code=~"5.*"}[30s]))',
+            "grpc_errors": 'sum by (destination_workload) (rate(istio_requests_total{reporter="destination", grpc_response_status!="0", grpc_response_status!=""}[30s]))',
+            "latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{reporter="destination"}[30s])) by (le, destination_workload))',
+            "cpu": f'sum(rate(container_cpu_usage_seconds_total{{namespace="default", pod=~"{self.current_service}.*", container!="POD", container!=""}}[30s]))',
+            "ram": f'sum(container_memory_working_set_bytes{{namespace="default", pod=~"{self.current_service}.*", container!="POD", container!=""}})'
+        }
+        def safe_query(query):
             try:
-                res = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query}, timeout=5).json()
-                if res.get('status') == 'success' and res['data']['result']:
-                    return float(res['data']['result'][0]['value'][1])
-            except Exception:
-                pass
-            return 0.0
+                res = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query}, timeout=3).json()
+                if res.get('status') == 'success' and res.get('data', {}).get('result'):
+                    return res['data']['result']
+            except: pass
+            return []
 
-        # Dùng linh hoạt destination_service (cho Host routing) và destination_workload (cho Subset routing)
-        # 1. TỔNG REQUEST
-        tot_canary_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{canary_svc}.*", reporter="destination"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="canary", reporter="destination"}}[2m]))'
-        tot_stable_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{stable_svc}.*", reporter="destination"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="latest", reporter="destination"}}[2m]))'
+        raw_traffic, raw_http, raw_grpc, raw_latency, raw_cpu, raw_ram = map(safe_query, [queries["traffic"], queries["http_errors"], queries["grpc_errors"], queries["latency"], queries["cpu"], queries["ram"]])
 
-        # 2. LỖI HTTP (Mã 5xx)
-        http_err_can_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{canary_svc}.*", reporter="destination", response_code=~"5.*"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="canary", reporter="destination", response_code=~"5.*"}}[2m]))'
-        http_err_sta_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{stable_svc}.*", reporter="destination", response_code=~"5.*"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="latest", reporter="destination", response_code=~"5.*"}}[2m]))'
+        traffic_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_traffic}
+        http_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_http}
+        grpc_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_grpc}
+        latency_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_latency if str(item['value'][1]) != 'NaN'}
 
-        # 3. LỖI gRPC (Mã trạng thái khác 0)
-        grpc_err_can_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{canary_svc}.*", reporter="destination", grpc_response_status=~"^[1-9].*"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="canary", reporter="destination", grpc_response_status=~"^[1-9].*"}}[2m]))'
-        grpc_err_sta_q = f'sum(rate(istio_requests_total{{namespace="{ns}", destination_service=~"^{stable_svc}.*", reporter="destination", grpc_response_status=~"^[1-9].*"}}[2m])) or sum(rate(istio_requests_total{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="latest", reporter="destination", grpc_response_status=~"^[1-9].*"}}[2m]))'
+        cpu_cores = float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0
+        ram_bytes = float(raw_ram[0]['value'][1]) if raw_ram else 0.0
 
-        # 4. LATENCY (P95)
-        metric_lat = "istio_request_duration_milliseconds_bucket" 
-        l_can_q = f'histogram_quantile(0.95, sum by (le) (rate({metric_lat}{{namespace="{ns}", destination_service=~"^{canary_svc}.*", reporter="destination"}}[2m]))) or histogram_quantile(0.95, sum by (le) (rate({metric_lat}{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="canary", reporter="destination"}}[2m])))'
-        l_sta_q = f'histogram_quantile(0.95, sum by (le) (rate({metric_lat}{{namespace="{ns}", destination_service=~"^{stable_svc}.*", reporter="destination"}}[2m]))) or histogram_quantile(0.95, sum by (le) (rate({metric_lat}{{namespace="{ns}", destination_workload=~"^{svc}-.*", destination_canonical_revision="latest", reporter="destination"}}[2m])))'
+        error_rates = {}
+        for svc, total_req in traffic_dict.items():
+            err_req = http_dict.get(svc, 0.0) + grpc_dict.get(svc, 0.0)
+            error_rates[svc] = err_req / total_req if total_req > 0 else 0.0
 
-        # --- THỰC THI VÀ TÍNH TOÁN ---
-        tot_can = max(get_val(tot_canary_q), 0.0001)
-        tot_sta = max(get_val(tot_stable_q), 0.0001)
-
-        err_can = get_val(http_err_can_q) + get_val(grpc_err_can_q)
-        err_sta = get_val(http_err_sta_q) + get_val(grpc_err_sta_q)
-
-        e_canary_rate = err_can / tot_can
-        e_stable_rate = err_sta / tot_sta
-
-        # 5. CPU/RAM
-        cpu_q = f'sum(rate(container_cpu_usage_seconds_total{{container="server", pod=~"{svc}-.*"}}[2m]))'
-        mem_q = f'sum(container_memory_working_set_bytes{{container="server", pod=~"{svc}-.*"}}) / 1024 / 1024'
-
+        stable_services_err = [rate for svc, rate in error_rates.items() if svc != self.current_service]
+        
         return {
-            "weight_pct": self._get_live_weight_pct(),
-            "e_canary": e_canary_rate,
-            "e_stable": e_stable_rate,
-            "l_canary": get_val(l_can_q),
-            "l_stable": get_val(l_sta_q),
-            "cpu": get_val(cpu_q),
-            "mem_mb": get_val(mem_q)
+            "canary_err": error_rates.get(self.current_service, 0.0), 
+            "stable_err": np.mean(stable_services_err) if stable_services_err else 0.0, 
+            "canary_lat": latency_dict.get(self.current_service, 0.0),
+            "cpu_cores": cpu_cores, 
+            "ram_mb": ram_bytes / (1024 * 1024), 
+            "weight_pct": self._get_live_weight_pct()
         }
 
-    def _clip(self, value, low, high):
-        return max(low, min(high, float(value)))
-
     def _process_and_normalize_features(self, raw):
-        # 1. Bảo vệ phép chia: Đặt epsilon lớn hơn một chút để tránh division by zero
-        EPS = 1e-3 
-        
-        # 2. Tính tỉ lệ an toàn
-        e_ratio = float(raw["e_canary"]) / max(float(raw["e_stable"]) + EPS, EPS)
-        l_ratio = float(raw["l_canary"]) / max(float(raw["l_stable"]) + EPS, EPS)
-        
-        # 3. Ép kiểu và Clipping (Rất quan trọng để PPO không bị "ngáo")
-        # Giới hạn ratio trong khoảng [0, 5] để tránh số quá lớn
-        e_ratio_n = np.clip(e_ratio, 0.0, 5.0) / 5.0
-        l_ratio_n = np.clip(l_ratio, 0.0, 5.0) / 5.0
-        
-        # 4. Chuẩn hóa CPU/RAM (dùng tham số cũ của bạn)
-        cpu_n = np.clip(float(raw["cpu"]) / CPU_REF, 0.0, 1.0)
-        mem_n = np.clip(float(raw["mem_mb"]) / MEM_REF_MB, 0.0, 1.0)
-        traffic_n = np.clip(float(raw["weight_pct"]) / 100.0, 0.0, 1.0)
+        return np.array([
+            min(raw["cpu_cores"] / CPU_REF, 1.0), min(raw["ram_mb"] / MEM_REF_MB, 1.0),
+            min(raw["canary_lat"] / 1000.0, 5.0), min((raw["canary_err"] / max(raw["stable_err"], EPSILON)), MAX_RATIO) / MAX_RATIO,
+            raw["weight_pct"] / 100.0
+        ], dtype=np.float32)
 
-        # Trả về 5 features chuẩn
-        return np.array([cpu_n, mem_n, l_ratio_n, e_ratio_n, traffic_n], dtype=np.float32)
-
-    def _get_obs(self):
-        """Gộp bộ nhớ history thành ma trận không gian (5, 30)"""
-        arr = np.stack(list(self.history), axis=1)
-        return arr.astype(np.float32)
-
-    def _execute_argo_command(self, action):    
-        cmd = []
-        if action == 1: # Promote
-            # Gọi trực tiếp argo-rollouts, không dùng kubectl
-            cmd = ["argo-rollouts", "promote", self.current_service, "-n", "default"]
-        elif action == 2: # Abort
-            cmd = ["argo-rollouts", "abort", self.current_service, "-n", "default"]
-        
-        if cmd:
-            # DÒNG DEBUG: In ra lệnh thực tế để xem nó gọi cái gì
-            print(f"DEBUG: Đang chạy lệnh: {' '.join(cmd)}")
-            
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            if res.returncode == 0:
-                print(f"  ✅ [SUCCESS] Lệnh Argo thành công: {res.stdout.strip()}")
-            else:
-                print(f"  ❌ [ERROR] Lệnh Argo thất bại: {res.stderr.strip()}")
-            time.sleep(15)
+    def _get_obs(self): return np.stack(list(self.history), axis=1).astype(np.float32)
 
     def step(self, action):
-
-        # 1. Thực thi hành động
-        self._execute_argo_command(action)
+        old_weight = self._get_live_weight_pct()
         
-        # 2. Thu thập dữ liệu
+        if action == 1: 
+            self._run_cmd(["argo-rollouts", "promote", self.current_service, "-n", "default"])
+            self._wait_for_rollout_step(old_weight)
+        elif action == 2: 
+            self._run_cmd(["argo-rollouts", "abort", self.current_service, "-n", "default"])
+            self._wait_for_rollout_step(old_weight)
+        
+        if action in [1, 2]:
+            print(f"{C.GREY}   ⏳ Đợi 25s cho Prometheus chốt sổ metrics mới...{C.END}")
+            time.sleep(25) 
+            
         raw = self._get_metrics_from_prometheus()
         norm_channels = self._process_and_normalize_features(raw)
         
-        # DEBUG: In ra dữ liệu Agent nhìn thấy
-        print(f"\n--- DEBUG STEP ---")
-        print(f"Action chọn: {action} (0=Hold, 1=Promote, 2=Rollback)")
-        print(f"Raw Metrics: Err_Canary={raw['e_canary']:.4f}, Err_Stable={raw['e_stable']:.4f}, Weight={raw['weight_pct']}%")
-        print(f"Normalized: CPU={norm_channels[0]:.2f}, RAM={norm_channels[1]:.2f}, Latency={norm_channels[2]:.2f}, Error={norm_channels[3]:.2f}, Traffic={norm_channels[4]:.2f}")
+        # --- UI DASHBOARD CHO STEP ---
+        act_str = f"{C.GREEN}🟢 PROMOTE (1){C.END}" if action == 1 else (f"{C.RED}🔴 ABORT (2){C.END}" if action == 2 else f"{C.YELLOW}🟡 HOLD (0){C.END}")
+        print(f"\n{C.CYAN}╭───────────────────────────────────────────────────╮{C.END}")
+        print(f"{C.CYAN}│{C.END} {C.BOLD}🤖 STEP {self.current_step+1:02d} | Quyết định: {act_str}".ljust(60) + f"{C.CYAN}│{C.END}")
+        print(f"{C.CYAN}├───────────────────────────────────────────────────┤{C.END}")
+        print(f"{C.CYAN}│{C.END} {C.BLUE}📊 Thực tế:{C.END} Err_Canary: {raw['canary_err']*100:5.2f}% | Latency: {raw['canary_lat']:7.1f}ms".ljust(60) + f"{C.CYAN}│{C.END}")
+        print(f"{C.CYAN}│{C.END}             Err_Stable: {raw['stable_err']*100:5.2f}% | Traffic: {raw['weight_pct']:5.1f}%".ljust(60) + f"{C.CYAN}│{C.END}")
+        print(f"{C.CYAN}│{C.END} {C.YELLOW}🧠 Agent  :{C.END} CPU:{norm_channels[0]:.2f} RAM:{norm_channels[1]:.2f} Lat:{norm_channels[2]:.2f} Err:{norm_channels[3]:.2f}".ljust(60) + f"{C.CYAN}│{C.END}")
+        print(f"{C.CYAN}╰───────────────────────────────────────────────────╯{C.END}")
         
         self.history.append(norm_channels)
         obs = self._get_obs()
 
-        e_ratio = raw["e_canary"] / max(raw["e_stable"], EPSILON)
-        l_ratio = raw["l_canary"] / max(raw["l_stable"], EPSILON)
+        e_ratio = raw["canary_err"] / max(raw["stable_err"], EPSILON)
+        l_ratio = raw["canary_lat"] / max(50.0, EPSILON) 
         
-        # BỘ LỌC NHIỄU: Chỉ báo động khi tỷ lệ lỗi thực > 5% (0.05) VÀ gấp đôi bản stable
-        is_high_error = (e_ratio > 2.0) and (raw["e_canary"] > 0.05)
-        
-        # BỘ LỌC ĐỘ TRỄ: Chỉ báo động khi trễ gấp đôi VÀ lớn hơn 50ms
-        is_high_latency = (l_ratio > 2.0) and (raw["l_canary"] > 50.0)
-        
+        is_high_error = (e_ratio > 2.0) and (raw["canary_err"] > 0.05)
+        is_high_latency = raw["canary_lat"] > 1000.0
         current_anomalous = is_high_error or is_high_latency
         
         reward = 0.0
         terminated = False
 
-        if action == 1: # Promote
-            if current_anomalous:
-                print(f"🚨 PHÁT HIỆN BẤT THƯỜNG! E_Ratio: {e_ratio:.2f}, L_Ratio: {l_ratio:.2f}")
-                reward -= 10.0 # Phạt nặng nếu Promote khi đang lỗi
-                terminated = True # Ép dừng và Reset
-            else:
-                reward += 1.0 # Thưởng nhẹ cho hành động Promote an toàn
-                # KHÔNG set terminated = True ở đây để nó tiếp tục bước sau
-        
-        elif action == 2: # Rollback/Abort
-            reward += 5.0 # Thưởng nếu Abort khi thấy lỗi
-            terminated = True # Kết thúc tập vì đã xử lý xong (dù tốt hay xấu)
-            
-        elif action == 0: # Hold
-            reward -= 0.1 # Phạt nhẹ để tránh tình trạng Agent không làm gì cả
-            # Không terminate, chờ xem bước sau thế nào
+        if current_anomalous:
+            print(f"{C.BOLD}{C.RED}   🚨 BÁO ĐỘNG LỖI! E_Ratio: {e_ratio:.2f} | L_Ratio: {l_ratio:.2f}{C.END}")
+            if action == 1: reward -= 15.0; terminated = True 
+            elif action == 2: reward += 10.0; terminated = True
+            elif action == 0: reward -= 0.5 
+        else: 
+            if action == 1: 
+                reward += 1.0
+                if raw["weight_pct"] >= 99.0:
+                    print(f"{C.BOLD}{C.GREEN}   🏁 Rollout đạt 100% an toàn!{C.END}")
+                    reward += 20.0; terminated = True 
+            elif action == 2: reward -= 10.0; terminated = True
+            elif action == 0: reward -= 0.1 
 
-        # Điều kiện dừng: Rollout hoàn tất 100%
-        if raw["weight_pct"] >= 99.0:
-            print("🏁 Rollout đạt 100%, kết thúc tập.")
-            reward += 20.0 # Thưởng lớn vì hoàn thành Release
-            terminated = True 
-
-        # Điều kiện dừng: Quá số bước tối đa
         self.current_step += 1
-        if self.current_step >= self.max_steps:
-            terminated = True
-            reward -= 5.0
-        # Thêm vào cuối hàm step(), ngay trước lệnh return
+        if self.current_step >= self.max_steps and not terminated:
+            terminated = True; reward -= 5.0
+
         if terminated:
-            print(f"🏁 TẬP HUẤN LUYỆN KẾT THÚC. Reward: {reward:.2f}. Đang reset môi trường...")
+            rew_color = C.GREEN if reward > 0 else C.RED
+            print(f"\n{C.BOLD}🏁 TẬP HUẤN LUYỆN KẾT THÚC | TỔNG ĐIỂM: {rew_color}{reward:+.2f}{C.END}")
 
         return obs, float(reward), bool(terminated), False, {}
 
-    def _inject_random_fault(self):
-        fault_types = ["http_error"]
-        chosen_fault = random.choice(fault_types)
-        print(f"🌪  [Chaos Mesh] Kịch bản kích hoạt: [{chosen_fault}] trên Pods [{self.current_service}]")
-
-        # Xóa Chaos cũ
-        subprocess.run(["kubectl", "delete", "networkchaos,podchaos,httpchaos", "--all", "-n", "default"], capture_output=True)
-
-        if chosen_fault == "high_latency":
-            # Tiêm độ trễ 3s vào tất cả các pod của service hiện tại
-            yaml_manifest = f"""
-apiVersion: chaos-mesh.org/v1alpha1
-kind: NetworkChaos
-metadata:
-  name: latency-{self.current_service}
-  namespace: default
-spec:
-  action: delay
-  mode: all
-  selector:
-    labelSelectors:
-      app: {self.current_service}
-  delay:
-    latency: '3s'
-    correlation: '100'
-    jitter: '0ms'
-"""
-            subprocess.run(["kubectl", "apply", "-f", "-"], input=yaml_manifest, text=True, capture_output=True)
-            
-        elif chosen_fault == "http_error":
-            # Dùng PodChaos thay vì NetworkChaos để vượt qua rào cản CNI của K3s
-            yaml_manifest = f"""
-apiVersion: chaos-mesh.org/v1alpha1
-kind: PodChaos
-metadata:
-  name: fail-{self.current_service}
-  namespace: default
-spec:
-  action: pod-failure
-  mode: all
-  duration: '45s'
-  selector:
-    labelSelectors:
-      app: {self.current_service}
-"""
-            subprocess.run(["kubectl", "apply", "-f", "-"], input=yaml_manifest, text=True, capture_output=True)
+    def _graceful_reset_baseline(self, svc_name):
+        print(f"{C.YELLOW}   🧹 Hủy bỏ Canary dở dang...{C.END}")
+        self._run_cmd(["argo-rollouts", "abort", svc_name, "-n", "default"], ignore_error=True)
+        
+        print(f"{C.YELLOW}   🧹 Trả môi trường về STABLE (none)...{C.END}")
+        self._apply_fault_to_rollout(svc_name, "none")
+        
+        # --- PATCH CHỐNG RACE CONDITION ---
+        print(f"{C.GREY}   ⏳ Đợi 8s cho Argo Controller khởi tạo Revision mới...{C.END}")
+        time.sleep(8) 
+        # ----------------------------------
+        
+        print(f"{C.YELLOW}   ⏩ Ép Promote Full 100%...{C.END}")
+        self._run_cmd(["argo-rollouts", "promote", svc_name, "--full", "-n", "default"], ignore_error=True)
+        
+        print(f"{C.GREY}   ⏳ Đang đợi toàn bộ Pod cũ shutdown êm ái...{C.END}")
+        # Tôi khuyên bạn nên nới lỏng timeout lên 180s cho chắc chắn đối với máy cá nhân
+        self._run_cmd(["argo-rollouts", "status", svc_name, "--timeout=180s", "-n", "default"])
 
     def reset(self, seed=None, options=None):   
         super().reset(seed=seed)
-        
-        print("\n🧹 [CLEANUP] Đang thực hiện RESET toàn bộ hệ thống (Hard Flush)...")
-        
-        # 1. Dọn dẹp triệt để TOÀN BỘ lỗi từ Chaos Mesh (không chỉ ở episode trước)
-        subprocess.run(["kubectl", "delete", "networkchaos,podchaos,httpchaos", "--all", "-n", "default"], capture_output=True)
-        
-        self.service_list = ['frontend']
-
-        # 2. Hủy bỏ (abort) mọi tiến trình Rollout đang dở dang của TẤT CẢ các service
-        # (Phòng trường hợp episode trước bị ngắt giữa chừng)
-        for svc in self.service_list:
-            subprocess.run(["argo-rollouts", "abort", svc, "-n", "default"], capture_output=True)
-        
-        # 3. Ép khởi động lại toàn bộ (Redeploy) để xả rác bộ nhớ và connection
-        print("🔄 [CLEANUP] Đang khởi tạo lại (Restart) toàn bộ Microservices...")
-        for svc in self.service_list:
-            subprocess.run(["kubectl", "rollout", "restart", f"rollout/{svc}", "-n", "default"], capture_output=True)
-        
-        # Đợi hệ thống ổn định (5s là không đủ, cần ít nhất 30-40s cho 10 services)
-        print("⏳ Đợi 40 giây để K3s cấp phát xong tài nguyên mới...")
-        time.sleep(2) 
-        
-        # --- KẾT THÚC CLEANUP ---
-
+        self.current_step = 0
+        self.service_list = ['checkoutservice']
         self.current_service = random.choice(self.service_list)
-        print(f"\n🚀 KHỞI ĐỘNG EPISODE: Tiến trình Rollout cho [{self.current_service}]")
 
-        # Ép tạo Revision mới cho Rollout bằng cách đổi annotation
-        tick = str(int(time.time()))
-        patch_json = f'{{"spec":{{"template":{{"metadata":{{"annotations":{{"rl-train-tick":"{tick}"}}}}}}}}}}'
-        cmd = ["kubectl", "patch", f"rollout/{self.current_service}", "-n", "default", "--type=merge", "-p", patch_json]
-        subprocess.run(cmd, capture_output=True)
-
-        time.sleep(10) 
+        print(f"\n{C.BOLD}{C.MAGENTA}═════════════════════════════════════════════════════════{C.END}")
+        print(f"{C.BOLD}{C.MAGENTA} 🔄 BẮT ĐẦU EPISODE MỚI CHO: {self.current_service.upper()}{C.END}")
+        print(f"{C.BOLD}{C.MAGENTA}═════════════════════════════════════════════════════════{C.END}")
         
-        # Tiêm lỗi vật lý bằng Chaos Mesh (bản patch mới nhất của bạn)
-        self._inject_random_fault()
+        self._graceful_reset_baseline(self.current_service)
         
-        # Chờ metric ngấm vào Prometheus
-        time.sleep(15) 
+        faults = ["none", "none", "none", "high_error", "high_latency", "combined"]
+        chosen_fault = random.choice(faults)
+        
+        fault_color = C.GREEN if chosen_fault == "none" else C.RED
+        print(f"\n{C.BOLD}🚀 BƠM KỊCH BẢN CANARY: {fault_color}[{chosen_fault.upper()}]{C.END}")
+        self._apply_fault_to_rollout(self.current_service, chosen_fault)
 
-        # Đọc dữ liệu ban đầu
+        self._wait_for_rollout_step(0.0) 
+        print(f"{C.GREY}   ⏳ Đợi 35s cho Prometheus thu thập data mồi...{C.END}")
+        time.sleep(35) 
+
         raw = self._get_metrics_from_prometheus()
         initial_channels = self._process_and_normalize_features(raw)
         self.history = deque([initial_channels]*self.seq_len, maxlen=self.seq_len)
