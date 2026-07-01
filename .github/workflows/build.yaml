@@ -2,7 +2,7 @@ name: Build and Push Microservices
 
 on:
   push:
-    branches: [ "OffTrain" ]
+    branches: [ "main" ]
   workflow_dispatch:
     paths:
       - 'services/src/**'
