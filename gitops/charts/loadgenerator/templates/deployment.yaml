@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+      annotations:
+        # Tự động inject Envoy Proxy của Istio vào pod tạo tải
+        sidecar.istio.io/inject: {{ .Values.istio.inject | quote }}
+    spec:
+      terminationGracePeriodSeconds: 5
+      restartPolicy: Always
+      initContainers:
+      - name: wait-for-frontend
+        image: busybox:latest
+        command: 
+          - sh
+          - -c
+          - 'until wget -q -O - http://{{ .Values.frontend.host }}:{{ .Values.frontend.port }} > /dev/null; do echo "Waiting for HTTP 200 from frontend..."; sleep 2; done;'
+      containers:
+      - name: main
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        - name: FRONTEND_ADDR
+          value: "{{ .Values.frontend.host }}:{{ .Values.frontend.port }}"
+        - name: USERS
+          value: {{ .Values.users | quote }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}

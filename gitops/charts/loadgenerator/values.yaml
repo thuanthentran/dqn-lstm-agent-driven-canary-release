@@ -1,0 +1,26 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/thuanthentran/loadgenerator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Cấu hình đích đến của luồng traffic
+frontend:
+  host: "frontend" # Tên service của Frontend trong cụm
+  port: 8080
+
+# Số lượng user giả lập đồng thời lướt web (bơm traffic)
+users: "10"
+
+# Tích hợp Istio Service Mesh để thu thập metrics
+istio:
+  inject: "true"
+
+resources:
+  requests:
+    cpu: 300m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -1,0 +1,7 @@
+serviceName: adservice
+replicas: 1
+image: ghcr.io/thuanthentran/adservice:latest
+containerPort: 9555
+env:
+  - name: PORT
+    value: "9555"

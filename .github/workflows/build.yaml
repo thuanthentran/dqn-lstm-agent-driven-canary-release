@@ -1,0 +1,66 @@
+name: Build and Push Microservices
+
+on:
+  push:
+    branches: [ "OffTrain" ]
+  workflow_dispatch:
+    paths:
+      - 'services/src/**'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Job này kiểm tra xem thư mục nào có thay đổi
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      # Xuất ra danh sách các service đã thay đổi
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            # Định nghĩa các service tại đây
+            adservice: 'services/src/adservice/**'
+            cartservice: 'services/src/cartservice/src/**'
+            checkoutservice: 'services/src/checkoutservice/**'
+            # Thêm các service khác vào đây khi bạn phát triển thêm
+            # paymentservice: 'services/src/paymentservice/**'
+
+  # Job này chỉ chạy nếu có thay đổi
+  build:
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' }} # Chỉ chạy nếu có thay đổi
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Tự động tạo danh sách build dựa trên kết quả job 'changes'
+        service: ${{ fromJson(needs.changes.outputs.services) }}
+    
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Image Name
+        id: prep
+        run: |
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ matrix.service == 'cartservice' && './services/src/cartservice/src' || format('./services/src/{0}', matrix.service) }}
+          file: ${{ matrix.service == 'cartservice' && './services/src/cartservice/src/Dockerfile' || format('./services/src/{0}/Dockerfile', matrix.service) }}
+          push: true
+          tags: ${{ steps.prep.outputs.image_name }}:latest

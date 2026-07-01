@@ -1,0 +1,4 @@
+apiVersion: v2
+name: universal-canary
+description: Một Helm chart dùng chung để release Canary bằng Argo Rollouts & Istio
+version: 0.1.0

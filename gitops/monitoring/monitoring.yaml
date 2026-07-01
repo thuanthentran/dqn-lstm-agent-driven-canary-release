@@ -9,13 +9,10 @@ spec:
   project: default
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
-
     chart: kube-prometheus-stack
-
     targetRevision: 69.3.1
     helm:
       values: |
-
         prometheus:
           prometheusSpec:
             storage:
@@ -28,12 +25,9 @@ spec:
                       storage: 10Gi
           service:
             type: NodePort
-
-
         grafana:
           initChownData:
             enabled: false
-          
           podSecurityContext:
             fsGroup: 472
             runAsGroup: 472
@@ -46,8 +40,6 @@ spec:
 
           service:
             type: NodePort
-
-
         alertmanager:
           service:
             type: NodePort

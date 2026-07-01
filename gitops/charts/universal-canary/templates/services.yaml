@@ -1,0 +1,65 @@
+# =========================================================
+# 1. MAIN SERVICE: Dành cho giao tiếp East-West thông thường
+# Các microservices khác sẽ gọi đến tên này qua DNS của K8s.
+# Istio Envoy sẽ chặn request ở đây và bẻ lái theo VirtualService.
+# =========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceName }}
+  namespace: default
+  labels:
+    app: {{ .Values.serviceName }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.serviceName }}
+  ports:
+  - port: {{ .Values.containerPort }}
+    targetPort: {{ .Values.containerPort }}
+    # Istio khuyên dùng prefix tên port (grpc-*, http-*) để nhận diện giao thức
+    name: {{ .Values.portName | default "grpc" }}
+
+---
+# =========================================================
+# 2. STABLE SERVICE: Dịch vụ "Bù nhìn" cho bản cũ
+# Argo Rollouts sẽ tự động tiêm mã hash của bản Stable vào đây
+# để chốt chặn các Pod đang chạy ổn định.
+# =========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceName }}-stable
+  namespace: default
+  labels:
+    app: {{ .Values.serviceName }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.serviceName }}
+    # Không cần ghi pod-template-hash, Argo Rollouts sẽ tự động ghi đè lúc runtime
+  ports:
+  - port: {{ .Values.containerPort }}
+    targetPort: {{ .Values.containerPort }}
+    name: {{ .Values.portName | default "grpc" }}
+
+---
+# =========================================================
+# 3. CANARY SERVICE: Dịch vụ "Bù nhìn" cho bản mới
+# Argo Rollouts sẽ tự động tiêm mã hash của bản Canary vào đây
+# =========================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceName }}-canary
+  namespace: default
+  labels:
+    app: {{ .Values.serviceName }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.serviceName }}
+  ports:
+  - port: {{ .Values.containerPort }}
+    targetPort: {{ .Values.containerPort }}
+    name: {{ .Values.portName | default "grpc" }}

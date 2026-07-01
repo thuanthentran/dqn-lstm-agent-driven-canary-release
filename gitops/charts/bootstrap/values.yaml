@@ -1,0 +1,56 @@
+global:
+  # Cập nhật lại Repo URL chính xác của bạn
+  repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
+  targetRevision: OffTrain
+  destinationNamespace: default
+
+services:
+  - name: adservice
+    # SỬA Ở ĐÂY: Thêm tiền tố gitops/ vào tất cả chartPath
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/adservice-values.yaml
+    
+  - name: cartservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/cartservice-values.yaml
+    
+  - name: checkoutservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/checkoutservice-values.yaml
+    
+  - name: currencyservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/currencyservice-values.yaml
+    
+  - name: emailservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/emailservice-values.yaml
+    
+  - name: frontend
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/frontend-values.yaml
+    
+  - name: paymentservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/paymentservice-values.yaml
+    
+  - name: productcatalogservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/productcatalogservice-values.yaml
+    
+  - name: recommendationservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/recommendationservice-values.yaml
+    
+  - name: shippingservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/shippingservice-values.yaml
+    
+  - name: loadgenerator
+    # Loadgenerator trỏ vào chart riêng của nó
+    chartPath: gitops/charts/loadgenerator
+    valueFile: ../../releases/loadgenerator-values.yaml
+  - name: base-resources
+    chartPath: gitops/base
+  - name: redis-cart
+    chartPath: gitops/base/redis-cart

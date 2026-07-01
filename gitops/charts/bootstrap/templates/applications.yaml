@@ -1,0 +1,35 @@
+{{- range .Values.services }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .name }}
+  namespace: argocd # Các thực thể điều hướng của ArgoCD phải nằm trong namespace argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io # Tự động xóa sạch tài nguyên K8s khi App bị xóa
+  labels:
+    managed-by: bootstrap-root
+spec:
+  project: default
+  source:
+    repoURL: {{ $.Values.global.repoURL | quote }}
+    targetRevision: {{ $.Values.global.targetRevision | quote }}
+    path: {{ .chartPath }}
+    {{- if .valueFile }}
+    helm:
+      valueFiles:
+        - {{ .valueFile | quote }}
+    {{- end }}
+  ignoreDifferences:
+  - group: networking.istio.io
+    kind: VirtualService
+    jsonPointers:
+    - /spec/http/0/fault  # ArgoCD sẽ bỏ qua mọi thay đổi do Python Patch vào đây
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: {{ $.Values.global.destinationNamespace | quote }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: false
+---
+{{- end }}

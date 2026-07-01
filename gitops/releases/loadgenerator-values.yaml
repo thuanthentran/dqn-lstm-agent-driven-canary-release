@@ -1,0 +1,14 @@
+# Cấu hình thực tế trên môi trường Sandbox của Agent
+users: "50" # Tăng nhẹ lượng traffic ban đầu để sinh số liệu ổn định hơn cho PPO
+
+frontend:
+  host: "frontend" # Trỏ full đường định danh mạng nội bộ K8s
+  port: 8080
+
+resources:
+  requests:
+    cpu: 400m
+    memory: 256Mi
+  limits:
+    cpu: 800m
+    memory: 512Mi
