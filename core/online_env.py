@@ -7,28 +7,19 @@ import time
 import random
 from collections import deque
 import re
-import json
-import sys
-import tempfile
 import os
+import sys
+
+# --- IMPORT KUBERNETES NATIVE API ---
+from kubernetes import client, config, watch
 
 EPSILON = 1e-6
 CPU_REF = 0.02
 MEM_REF_MB = 128.0
 MAX_RATIO = 5.0
 
-# --- BỘ MÀU SẮC THẨM MỸ (ANSI COLORS) ---
 class C:
-    RED = '\033[91m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
-    CYAN = '\033[96m'
-    WHITE = '\033[97m'
-    GREY = '\033[90m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
+    RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, GREY, BOLD, END = '\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m', '\033[90m', '\033[1m', '\033[0m'
 
 class OnlineCanaryEnv(gym.Env):
     def __init__(self, service_list=None, prometheus_url="http://172.26.52.132:30090", seq_len=30):
@@ -43,6 +34,20 @@ class OnlineCanaryEnv(gym.Env):
         self.history = deque(maxlen=self.seq_len)
         self.current_step = 0
         self.max_steps = 20  
+        
+        # --- KHỞI TẠO KUBERNETES API CLIENT ---
+        print(f"{C.CYAN}🔌 Đang kết nối trực tiếp đến K3s API Server...{C.END}")
+        try:
+            config.load_kube_config()
+        except:
+            print(f"{C.RED}❌ Lỗi: Không tìm thấy file Kubeconfig.{C.END}")
+            sys.exit(1)
+            
+        self.custom_api = client.CustomObjectsApi()
+        self.apps_api = client.AppsV1Api()
+        self.argo_group = "argoproj.io"
+        self.argo_version = "v1alpha1"
+        self.argo_plural = "rollouts"
 
     def _run_cmd(self, cmd, ignore_error=False):
         res = subprocess.run(cmd, capture_output=True, text=True)
@@ -53,20 +58,41 @@ class OnlineCanaryEnv(gym.Env):
             sys.exit(1)
         return res
 
-    def _wait_for_rollout_step(self, old_weight):
-        print(f"{C.GREY}   🔄 Đang chờ Argo rẽ traffic (Đang ở: {old_weight}%)...{C.END}")
-        for _ in range(40): 
-            current_weight = self._get_live_weight_pct()
-            if current_weight != old_weight:
-                print(f"{C.GREEN}   ✅ Đã rẽ traffic thành công lên: {current_weight}%{C.END}")
-                return
-            time.sleep(1)
+    def _get_live_weight_pct_api(self):
+        """Đọc thẳng JSON từ K3s API Memory, bỏ qua CLI, độ trễ 0ms"""
+        try:
+            ro = self.custom_api.get_namespaced_custom_object(self.argo_group, self.argo_version, "default", self.current_service)
+            return float(ro.get('status', {}).get('canary', {}).get('weights', {}).get('canary', {}).get('weight', 0.0))
+        except: return 0.0
 
-    def _apply_fault_to_rollout(self, svc_name, fault_value):
-        res = self._run_cmd(["kubectl", "get", "rollout", svc_name, "-n", "default", "-o", "json"])
-        rollout_data = json.loads(res.stdout)
+    def _wait_for_weight_change_api(self, old_weight):
+        """[HƯỚNG SỰ KIỆN] Mở luồng WebSocket nghe ngóng sự thay đổi của Rollout"""
+        print(f"{C.GREY}   🔄 [K8s API] Mở luồng Event Stream, đợi traffic rẽ (cũ: {old_weight}%)...{C.END}")
+        w = watch.Watch()
+        try:
+            for event in w.stream(self.custom_api.list_namespaced_custom_object,
+                                  self.argo_group, self.argo_version, "default", self.argo_plural,
+                                  timeout_seconds=45):
+                ro = event.get('object', {})
+                if ro.get('metadata', {}).get('name') != self.current_service:
+                    continue
+                
+                try:
+                    curr_weight = float(ro.get('status', {}).get('canary', {}).get('weights', {}).get('canary', {}).get('weight', 0.0))
+                except: curr_weight = 0.0
+                
+                if curr_weight != old_weight:
+                    print(f"{C.GREEN}   ✅ [K8s API] K3s PING: Traffic đã chạm mốc {curr_weight}%!{C.END}")
+                    return curr_weight
+        finally:
+            w.stop()
+        return old_weight
+
+    def _apply_fault_to_rollout_api(self, svc_name, fault_value):
+        """Bơm lỗi thẳng vào cấu trúc dữ liệu của Kubernetes (Không dùng temp file)"""
+        ro = self.custom_api.get_namespaced_custom_object(self.argo_group, self.argo_version, "default", svc_name)
+        containers = ro.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
         
-        containers = rollout_data.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
         for c in containers:
             if c.get("name") in [svc_name, "server"]: 
                 env_list = c.get("env", [])
@@ -76,30 +102,28 @@ class OnlineCanaryEnv(gym.Env):
                         e["value"] = fault_value
                         found = True
                         break
-                if not found:
-                    env_list.append({"name": "FAULT_SCENARIO", "value": fault_value})
+                if not found: env_list.append({"name": "FAULT_SCENARIO", "value": fault_value})
                 c["env"] = env_list
                 break
 
-        patch_obj = { "spec": { "template": { "metadata": { "annotations": { "rl-train-tick": str(int(time.time())) } }, "spec": { "containers": containers } } } }
+        patch_body = {
+            "spec": {"template": {"metadata": {"annotations": {"rl-train-tick": str(int(time.time()))}}, "spec": {"containers": containers}}}
+        }
+        self.custom_api.patch_namespaced_custom_object(self.argo_group, self.argo_version, "default", self.argo_plural, svc_name, patch_body)
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(patch_obj, f)
-            temp_path = f.name
-            
-        self._run_cmd(["kubectl", "patch", f"rollout/{svc_name}", "-n", "default", "--type=merge", "--patch-file", temp_path])
-        os.remove(temp_path)
-
-    def _get_live_weight_pct(self):
+    def _restart_loadgenerator_api(self):
+        """Khởi động lại LoadGen bằng K8s API để xả hàng đợi kẹt xe ngay lập tức"""
+        patch_body = {"spec": {"template": {"metadata": {"annotations": {"kubectl.kubernetes.io/restartedAt": str(time.time())}}}}}
         try:
-            res = self._run_cmd(["argo-rollouts", "get", "rollout", self.current_service, "-n", "default"])
-            match = re.search(r'ActualWeight:\s+(\d+)', res.stdout)
-            if match: return float(match.group(1))
-            return 0.0
-        except SystemExit:
-            raise
-        except Exception:
-            return 0.0
+            self.apps_api.patch_namespaced_deployment("loadgenerator", "default", patch_body)
+        except: pass
+
+    def _wait_for_prometheus(self, seconds=35):
+        """Hàm duy nhất cần dùng Sleep vì toán học Prometheus cần thu thập đủ Time-series"""
+        print(f"{C.GREY}   ⏳ [Prometheus] Chờ {seconds}s để cỗ máy Time-Series tính toán mảng [30s]...{C.END}")
+        for i in range(seconds, 0, -5):
+            print(f"{C.GREY}       ... còn {i}s{C.END}")
+            time.sleep(5)
 
     def _get_metrics_from_prometheus(self):
         queries = {
@@ -113,8 +137,7 @@ class OnlineCanaryEnv(gym.Env):
         def safe_query(query):
             try:
                 res = requests.get(f"{self.prometheus_url}/api/v1/query", params={"query": query}, timeout=3).json()
-                if res.get('status') == 'success' and res.get('data', {}).get('result'):
-                    return res['data']['result']
+                if res.get('status') == 'success' and res.get('data', {}).get('result'): return res['data']['result']
             except: pass
             return []
 
@@ -124,9 +147,6 @@ class OnlineCanaryEnv(gym.Env):
         http_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_http}
         grpc_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_grpc}
         latency_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_latency if str(item['value'][1]) != 'NaN'}
-
-        cpu_cores = float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0
-        ram_bytes = float(raw_ram[0]['value'][1]) if raw_ram else 0.0
 
         error_rates = {}
         for svc, total_req in traffic_dict.items():
@@ -139,9 +159,9 @@ class OnlineCanaryEnv(gym.Env):
             "canary_err": error_rates.get(self.current_service, 0.0), 
             "stable_err": np.mean(stable_services_err) if stable_services_err else 0.0, 
             "canary_lat": latency_dict.get(self.current_service, 0.0),
-            "cpu_cores": cpu_cores, 
-            "ram_mb": ram_bytes / (1024 * 1024), 
-            "weight_pct": self._get_live_weight_pct()
+            "cpu_cores": float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0, 
+            "ram_mb": (float(raw_ram[0]['value'][1]) if raw_ram else 0.0) / (1024 * 1024), 
+            "weight_pct": self._get_live_weight_pct_api()
         }
 
     def _process_and_normalize_features(self, raw):
@@ -154,23 +174,22 @@ class OnlineCanaryEnv(gym.Env):
     def _get_obs(self): return np.stack(list(self.history), axis=1).astype(np.float32)
 
     def step(self, action):
-        old_weight = self._get_live_weight_pct()
+        old_weight = self._get_live_weight_pct_api()
         
+        # Chỉ ủy quyền hành động rẽ cho CLI, còn lại Python làm chủ
         if action == 1: 
             self._run_cmd(["argo-rollouts", "promote", self.current_service, "-n", "default"])
-            self._wait_for_rollout_step(old_weight)
+            self._wait_for_weight_change_api(old_weight)
         elif action == 2: 
             self._run_cmd(["argo-rollouts", "abort", self.current_service, "-n", "default"])
-            self._wait_for_rollout_step(old_weight)
+            self._wait_for_weight_change_api(old_weight)
         
         if action in [1, 2]:
-            print(f"{C.GREY}   ⏳ Đợi 25s cho Prometheus chốt sổ metrics mới...{C.END}")
-            time.sleep(25) 
+            self._wait_for_prometheus(25) 
             
         raw = self._get_metrics_from_prometheus()
         norm_channels = self._process_and_normalize_features(raw)
         
-        # --- UI DASHBOARD CHO STEP ---
         act_str = f"{C.GREEN}🟢 PROMOTE (1){C.END}" if action == 1 else (f"{C.RED}🔴 ABORT (2){C.END}" if action == 2 else f"{C.YELLOW}🟡 HOLD (0){C.END}")
         print(f"\n{C.CYAN}╭───────────────────────────────────────────────────╮{C.END}")
         print(f"{C.CYAN}│{C.END} {C.BOLD}🤖 STEP {self.current_step+1:02d} | Quyết định: {act_str}".ljust(60) + f"{C.CYAN}│{C.END}")
@@ -218,23 +237,30 @@ class OnlineCanaryEnv(gym.Env):
         return obs, float(reward), bool(terminated), False, {}
 
     def _graceful_reset_baseline(self, svc_name):
-        print(f"{C.YELLOW}   🧹 Hủy bỏ Canary dở dang...{C.END}")
-        self._run_cmd(["argo-rollouts", "abort", svc_name, "-n", "default"], ignore_error=True)
-        
         print(f"{C.YELLOW}   🧹 Trả môi trường về STABLE (none)...{C.END}")
-        self._apply_fault_to_rollout(svc_name, "none")
+        self._run_cmd(["argo-rollouts", "abort", svc_name, "-n", "default"], ignore_error=True)
+        self._apply_fault_to_rollout_api(svc_name, "none")
+        time.sleep(3) # Cho phép K3s chốt database
         
-        # --- PATCH CHỐNG RACE CONDITION ---
-        print(f"{C.GREY}   ⏳ Đợi 8s cho Argo Controller khởi tạo Revision mới...{C.END}")
-        time.sleep(8) 
-        # ----------------------------------
-        
-        print(f"{C.YELLOW}   ⏩ Ép Promote Full 100%...{C.END}")
+        print(f"{C.YELLOW}   ⏩ Ép Promote Full 100% để dọn dẹp Canary cũ...{C.END}")
         self._run_cmd(["argo-rollouts", "promote", svc_name, "--full", "-n", "default"], ignore_error=True)
         
-        print(f"{C.GREY}   ⏳ Đang đợi toàn bộ Pod cũ shutdown êm ái...{C.END}")
-        # Tôi khuyên bạn nên nới lỏng timeout lên 180s cho chắc chắn đối với máy cá nhân
-        self._run_cmd(["argo-rollouts", "status", svc_name, "--timeout=180s", "-n", "default"])
+        print(f"{C.YELLOW}   🚿 Xả hàng đợi kẹt xe của LoadGenerator bằng K8s API...{C.END}")
+        self._restart_loadgenerator_api()
+        
+        print(f"{C.GREY}   ⏳ [K8s API] Lắng nghe Event cho đến khi Rollout đạt trạng thái Healthy...{C.END}")
+        w = watch.Watch()
+        try:
+            for event in w.stream(self.custom_api.list_namespaced_custom_object,
+                                  self.argo_group, self.argo_version, "default", self.argo_plural,
+                                  timeout_seconds=90):
+                ro = event.get('object', {})
+                if ro.get('metadata', {}).get('name') != svc_name: continue
+                if ro.get('status', {}).get('phase', '') == 'Healthy':
+                    print(f"{C.GREEN}   ✅ [K8s API] Hệ thống STABLE đã sẵn sàng 100%!{C.END}")
+                    break
+        finally:
+            w.stop()
 
     def reset(self, seed=None, options=None):   
         super().reset(seed=seed)
@@ -253,11 +279,11 @@ class OnlineCanaryEnv(gym.Env):
         
         fault_color = C.GREEN if chosen_fault == "none" else C.RED
         print(f"\n{C.BOLD}🚀 BƠM KỊCH BẢN CANARY: {fault_color}[{chosen_fault.upper()}]{C.END}")
-        self._apply_fault_to_rollout(self.current_service, chosen_fault)
-
-        self._wait_for_rollout_step(0.0) 
-        print(f"{C.GREY}   ⏳ Đợi 35s cho Prometheus thu thập data mồi...{C.END}")
-        time.sleep(35) 
+        
+        self._apply_fault_to_rollout_api(self.current_service, chosen_fault)
+        self._wait_for_weight_change_api(100.0) # Khóa luồng cho đến khi rẽ nhánh xong
+        
+        self._wait_for_prometheus(35) 
 
         raw = self._get_metrics_from_prometheus()
         initial_channels = self._process_and_normalize_features(raw)
