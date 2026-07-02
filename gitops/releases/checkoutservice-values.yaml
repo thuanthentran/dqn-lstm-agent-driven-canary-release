@@ -1,7 +1,19 @@
 serviceName: checkoutservice
-replicas: 1
+replicas: 5  # <--- CHỐT HẠ 5 REPLICAS
 image: ghcr.io/thuanthentran/checkoutservice:latest
 containerPort: 5050
+
+# Khóa Istio Proxy chống Cold-Start
+podAnnotations:
+  proxy.istio.io/config: '{ "holdApplicationUntilProxyStarts": true }'
+
+# Ép Pod phải Ready hoàn toàn mới cho request vào
+readinessProbe:
+  tcpSocket:
+    port: 5050
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
 env:
   - name: PORT
     value: "5050"
