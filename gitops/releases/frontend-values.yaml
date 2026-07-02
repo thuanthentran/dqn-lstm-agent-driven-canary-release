@@ -3,6 +3,8 @@ replicas: 1
 image: ghcr.io/thuanthentran/frontend:latest
 containerPort: 8080
 portName: http
+serviceType: NodePort   # <--- Thêm type NodePort
+nodePort: 30080
 env:
   - name: PORT
     value: "8080"

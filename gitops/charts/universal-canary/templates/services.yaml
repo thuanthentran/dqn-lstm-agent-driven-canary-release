@@ -11,14 +11,16 @@ metadata:
   labels:
     app: {{ .Values.serviceName }}
 spec:
-  type: ClusterIP
+  type: {{ .Values.serviceType | default "ClusterIP" }}
   selector:
     app: {{ .Values.serviceName }}
   ports:
   - port: {{ .Values.containerPort }}
     targetPort: {{ .Values.containerPort }}
-    # Istio khuyên dùng prefix tên port (grpc-*, http-*) để nhận diện giao thức
     name: {{ .Values.portName | default "grpc" }}
+    {{- if and (eq (.Values.serviceType | default "ClusterIP") "NodePort") .Values.nodePort }}
+    nodePort: {{ .Values.nodePort }}
+    {{- end }}
 
 ---
 # =========================================================
