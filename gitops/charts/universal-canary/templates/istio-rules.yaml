@@ -1,14 +1,4 @@
 apiVersion: networking.istio.io/v1alpha3
-kind: DestinationRule
-metadata:
-  name: {{ .Values.serviceName }}-dr
-spec:
-  host: {{ .Values.serviceName }}
-  subsets:
-  - name: stable
-  - name: canary
----
-apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
   name: {{ .Values.serviceName }}-vsvc
@@ -17,6 +7,15 @@ spec:
   - {{ .Values.serviceName }}
   http:
   - name: primary-route
+    # 1. TIMEOUT VỪA PHẢI: Nếu code ứng dụng bị treo (kịch bản HIGH_LATENCY), 
+    # ném thẳng mã lỗi 504 Timeout sau 3 giây để Agent thấy được sự chậm chạp.
+    timeout: 3s
+    
+    # 2. CẤM RETRY: Nếu code ứng dụng rớt (trả HTTP 500), cấm Proxy thử lại.
+    # Phải báo cáo ngay lỗi đó cho Prometheus để phản ánh đúng độ tồi tệ của source code.
+    retries:
+      attempts: 0
+      
     route:
     - destination:
         host: {{ .Values.serviceName }}
@@ -26,3 +25,15 @@ spec:
         host: {{ .Values.serviceName }}
         subset: canary
       weight: 0
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: {{ .Values.serviceName }}-dr
+spec:
+  host: {{ .Values.serviceName }}
+  # XÓA BỎ HOÀN TOÀN TẤT CẢ KHỐI trafficPolicy (outlierDetection, connectionPool)
+  # Để mặc cho request đâm thẳng vào Pod. Pod quá tải tự chịu, code lỗi tự báo 500!
+  subsets:
+  - name: stable
+  - name: canary
