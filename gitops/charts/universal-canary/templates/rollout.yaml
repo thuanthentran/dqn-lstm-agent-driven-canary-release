@@ -5,8 +5,8 @@ metadata:
   name: {{ .Values.serviceName }}
   namespace: default
 spec:
-  # Mặc định chạy 2 replicas nếu không được khai báo trong values
-  replicas: {{ .Values.replicas | default 2 }}
+  # Tự động lấy số lượng replicas gán tĩnh từ file values (Ví dụ: 5 pods)
+  replicas: {{ .Values.replicas | default 1 }}
   revisionHistoryLimit: 2
   selector:
     matchLabels:
@@ -16,22 +16,25 @@ spec:
     metadata:
       labels:
         app: {{ .Values.serviceName }}
+      {{- if .Values.podAnnotations }}
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+      {{- end }}
     spec:
       containers:
       - name: server
         image: {{ .Values.image }}
         ports:
         - containerPort: {{ .Values.containerPort }}
-        
-        # [QUAN TRỌNG] Hỗ trợ khai báo biến môi trường linh hoạt
-        # (Google Microservices Demo dùng rất nhiều biến môi trường để gọi nhau)
-        {{- if .Values.env }}
+        {{- if .Values.readinessProbe }}
+        readinessProbe:
+          {{- toYaml .Values.readinessProbe | nindent 10 }}
+        {{- end }}
         env:
         {{- range .Values.env }}
         - name: {{ .name }}
           value: {{ .value | quote }}
-        {{- end }}
-        {{- end }}
+        {{- end }} # <--- Chỉ giữ lại 1 end này cho vòng lặp range
 
   strategy:
     canary:
@@ -39,11 +42,6 @@ spec:
       canaryService: {{ .Values.serviceName }}-canary
       stableService: {{ .Values.serviceName }}-stable
       
-      # Chỉ lưu lại lịch sử Analysis để dọn dẹp cụm K8s
-      #analysis:
-      #  successfulRunHistoryLimit: 1
-      #  unsuccessfulRunHistoryLimit: 2
-        
       # Bàn giao quyền bẻ traffic cho Istio
       trafficRouting:
         istio:
@@ -62,17 +60,10 @@ spec:
       - setWeight: 20
       - pause: {}
 
-
       # --- BƯỚC 2: Tăng tốc 50% ---
       - setWeight: 50
       - pause: {}         
 
-
-
       # --- BƯỚC 3: Mở rộng 80% ---
       - setWeight: 80
       - pause: {}
-
-              
-      # --- HOÀN THÀNH 100% ---
-      # (Sau bước 80%, nếu Agent trả về Action=1, Rollout sẽ tự động xả 100%)
