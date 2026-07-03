@@ -6,12 +6,14 @@ metadata:
   namespace: default
 spec:
   parentRefs:
-  - kind: Service
-    name: {{ .Values.serviceName }}
-    port: {{ .Values.containerPort }} # 5050
+  - kind: Gateway
+    name: {{ .Values.serviceName }}-gateway # <--- TRỎ ĐÚNG VÀO GATEWAY CỦA SERVICE ĐÓ
+    namespace: default
   rules:
-  - timeouts:
-      request: 3s # Ép timeout 3s để Agent học được lỗi hữu cơ
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
     backendRefs:
     - name: {{ .Values.serviceName }}-stable
       port: {{ .Values.containerPort }}
