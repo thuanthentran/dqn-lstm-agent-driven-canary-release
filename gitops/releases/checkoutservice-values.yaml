@@ -1,24 +1,31 @@
 serviceName: checkoutservice
-replicas: 5  # <--- CHỐT HẠ 5 REPLICAS
-image: ghcr.io/thuanthentran/checkoutservice:latest
+replicas: 5
+image: ghcr.io/thuanthentran/checkoutservice:latest # Đảm bảo tag image đồng bộ với CI/CD
 containerPort: 5050
 
-# Khóa Istio Proxy chống Cold-Start
-podAnnotations:
-  proxy.istio.io/config: '{ "holdApplicationUntilProxyStarts": true }'
+# ĐÃ XÓA: podAnnotations liên quan đến Istio
 
 # Ép Pod phải Ready hoàn toàn mới cho request vào
 readinessProbe:
   tcpSocket:
     port: 5050
   initialDelaySeconds: 5
+  periodSeconds: 3
+  failureThreshold: 2 
+
+# Lệnh hành quyết: Nếu Pod bị treo, giết và tạo lại
+livenessProbe:
+  tcpSocket:
+    port: 5050
+  initialDelaySeconds: 10
   periodSeconds: 5
+  failureThreshold: 3
 
 env:
   - name: PORT
     value: "5050"
   - name: FAULT_SCENARIO
-    value: "none" # Mặc định là không có lỗi
+    value: "none" # Luôn giữ none, Agent sẽ tự tiêm lỗi qua biến môi trường sau
   - name: PRODUCT_CATALOG_SERVICE_ADDR
     value: "productcatalogservice:3550"
   - name: SHIPPING_SERVICE_ADDR
