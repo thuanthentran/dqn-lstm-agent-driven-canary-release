@@ -38,32 +38,18 @@ spec:
 
   strategy:
     canary:
-      # Hai service đóng vai trò "chốt chặn" cho Istio
       canaryService: {{ .Values.serviceName }}-canary
       stableService: {{ .Values.serviceName }}-stable
       
-      # Bàn giao quyền bẻ traffic cho Istio
+      # PATCH: Chuyển từ Istio sang Gateway API
       trafficRouting:
-        istio:
-          virtualService:
-            name: {{ .Values.serviceName }}-vsvc
-            routes:
-            - primary-route
-          destinationRule:
-            name: {{ .Values.serviceName }}-dr
-            canarySubsetName: canary
-            stableSubsetName: stable
+        gatewayAPI:
+          httpRoute: {{ .Values.serviceName }}-route
             
-      # KỊCH BẢN PHÁT HÀNH (Steps) - Gọi tới PPO Agent
       steps:
-      # --- BƯỚC 1: Thăm dò 20% ---
       - setWeight: 20
       - pause: {}
-
-      # --- BƯỚC 2: Tăng tốc 50% ---
       - setWeight: 50
-      - pause: {}         
-
-      # --- BƯỚC 3: Mở rộng 80% ---
+      - pause: {}
       - setWeight: 80
       - pause: {}
