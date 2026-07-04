@@ -27,14 +27,14 @@ env:
   - name: FAULT_SCENARIO
     value: "none" # Luôn giữ none, Agent sẽ tự tiêm lỗi qua biến môi trường sau
   - name: PRODUCT_CATALOG_SERVICE_ADDR
-    value: "productcatalogservice:3550"
+    value: "cilium-gateway-productcatalogservice-gateway:80"
   - name: SHIPPING_SERVICE_ADDR
-    value: "shippingservice:50051"
+    value: "cilium-gateway-shippingservice-gateway:80"
   - name: PAYMENT_SERVICE_ADDR
-    value: "paymentservice:50051"
+    value: "cilium-gateway-paymentservice-gateway:80"
   - name: EMAIL_SERVICE_ADDR
-    value: "emailservice:5000"
+    value: "cilium-gateway-emailservice-gateway:80"
   - name: CURRENCY_SERVICE_ADDR
-    value: "currencyservice:7000"
+    value: "cilium-gateway-currencyservice-gateway:80"
   - name: CART_SERVICE_ADDR
-    value: "cartservice:7070"
+    value: "cilium-gateway-cartservice-gateway:80"

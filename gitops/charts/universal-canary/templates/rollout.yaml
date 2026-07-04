@@ -43,8 +43,10 @@ spec:
       
       # PATCH: Chuyển từ Istio sang Gateway API
       trafficRouting:
-        gatewayAPI:
-          httpRoute: {{ .Values.serviceName }}-route
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: {{ .Values.serviceName }}-route
+            namespace: default
             
       steps:
       - setWeight: 20

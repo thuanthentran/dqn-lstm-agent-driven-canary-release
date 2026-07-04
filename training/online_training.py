@@ -23,7 +23,7 @@ OFFLINE_NORM_PATH = os.path.join(BASE_DIR, "models", "vec_normalize.pkl")
 ONLINE_SAVE_PATH = os.path.join(BASE_DIR, "models", "ppo_lstm_online_best")
 ONLINE_NORM_PATH = os.path.join(BASE_DIR, "models", "vec_normalize_online.pkl")
 
-TOTAL_TIMESTEPS = 25 
+TOTAL_TIMESTEPS = 4
 FINE_TUNE_LR = 1e-5 
 
 class DebugCallback(BaseCallback):
@@ -55,7 +55,7 @@ def train_online() -> None:
     model = RecurrentPPO.load(
         OFFLINE_MODEL_PATH, 
         env=env, 
-        custom_objects={"learning_rate": FINE_TUNE_LR, "clip_range": 0.1, "n_step": 64, "batch_size": 32},
+        custom_objects={"learning_rate": FINE_TUNE_LR, "clip_range": 0.1, "n_steps": 4, "batch_size": 4},
         tensorboard_log=LOG_DIR
     )
 

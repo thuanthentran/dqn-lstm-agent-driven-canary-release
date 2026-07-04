@@ -1,0 +1,25 @@
+# Default values for universal-canary chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+serviceName: example-service
+replicas: 1
+image: nginx:latest
+containerPort: 80
+portName: http
+serviceType: ClusterIP
+
+# nodePort is only used if serviceType is NodePort
+# nodePort: 30080
+
+podAnnotations: {}
+
+readinessProbe: {}
+#  httpGet:
+#    path: /
+#    port: 80
+#  initialDelaySeconds: 5
+
+env: []
+#  - name: EXAMPLE_ENV
+#    value: "example"

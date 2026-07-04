@@ -1,0 +1,41 @@
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: l7-visibility-microservices
+  namespace: default
+spec:
+  # Chỉ áp dụng cho các pod nằm trong namespace 'default'
+  endpointSelector:
+    matchLabels: {}
+    
+  ingress:
+    # 1. Cho phép tất cả traffic L3/L4 vào các microservices
+    # Để tránh việc block các port không khai báo (như Redis 6379)
+    - fromEntities:
+        - all
+        
+    # 2. Ép L7 Visibility chỉ định riêng cho các port HTTP và gRPC
+    # TUYỆT ĐỐI KHÔNG đưa Redis (6379) vào danh sách này
+    - fromEntities:
+        - all
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+            - port: "5050"
+              protocol: TCP
+            - port: "7070"
+              protocol: TCP
+            - port: "9555"
+              protocol: TCP
+            - port: "7000"
+              protocol: TCP
+            - port: "3550"
+              protocol: TCP
+            - port: "50051"
+              protocol: TCP
+          rules:
+            http:
+              - {}

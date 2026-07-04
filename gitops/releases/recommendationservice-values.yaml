@@ -6,6 +6,6 @@ env:
   - name: PORT
     value: "8080"
   - name: PRODUCT_CATALOG_SERVICE_ADDR
-    value: "productcatalogservice:3550"
+    value: "cilium-gateway-productcatalogservice-gateway:80"
   - name: DISABLE_PROFILER
     value: "1"
