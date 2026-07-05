@@ -24,6 +24,7 @@ spec:
       containers:
       - name: server
         image: {{ .Values.image }}
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: {{ .Values.containerPort }}
         {{- if .Values.readinessProbe }}
