@@ -18,7 +18,7 @@ CPU_REF = 0.02 * 5
 MEM_REF_MB = 128.0 * 5
 MAX_RATIO = 5.0
 LAPLACE_BUFFER = 2.0
-FRONTEND_URL = "http://192.168.142.165:30693"
+FRONTEND_URL = "http://192.168.142.165:30080"
 
 class C:
     RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, GREY, BOLD, END = '\033[91m', '\033[92m', '\033[93m', '\033[94m', '\033[95m', '\033[96m', '\033[97m', '\033[90m', '\033[1m', '\033[0m'
@@ -275,7 +275,18 @@ class OnlineCanaryEnv(gym.Env):
         print(f"{C.CYAN}╰─────────────────────────────────────────────────────────────╯{C.END}")
 
     def step(self, action):
+        # 1. Đánh giá trạng thái môi trường TRƯỚC KHI thực hiện action (để tránh lỗi mất metrics khi ABORT)
+        raw_before = self._get_metrics_from_prometheus()
+        e_ratio_before = raw_before["canary_err"] / max(raw_before["stable_err"], EPSILON)
+        l_ratio_before = raw_before["canary_lat"] / max(50.0, EPSILON) 
+        is_high_error_before = (e_ratio_before > 2.0) and (raw_before["canary_err"] > 0.05)
+        is_high_latency_before = raw_before["canary_lat"] > 1000.0
+        was_anomalous = is_high_error_before or is_high_latency_before
+
         old_weight = self._get_live_weight_pct_api()
+        
+        act_str = f"{C.GREEN}🟢 PROMOTE [ID: 1]{C.END}" if action == 1 else (f"{C.RED}🔴 ABORT [ID: 2]{C.END}" if action == 2 else f"{C.YELLOW}🟡 HOLD [ID: 0]{C.END}")
+        print(f"\n{C.BOLD}{C.MAGENTA}⚡ [Agent Quyết Định] Dựa vào metrics hiện tại, Agent chọn: {act_str}{C.END} (Bắt đầu thực thi...)")
         
         if action == 1: 
             self._run_cmd(["argo-rollouts", "promote", self.current_service, "-n", "default"])
@@ -299,13 +310,6 @@ class OnlineCanaryEnv(gym.Env):
         self.history.append(norm_channels)
         obs = self._get_obs()
 
-        e_ratio = raw["canary_err"] / max(raw["stable_err"], EPSILON)
-        l_ratio = raw["canary_lat"] / max(50.0, EPSILON) 
-        
-        is_high_error = (e_ratio > 2.0) and (raw["canary_err"] > 0.05)
-        is_high_latency = raw["canary_lat"] > 1000.0
-        current_anomalous = is_high_error or is_high_latency
-        
         # SỬA LỖI LOGIC: Kiểm tra Rollout Phase thay vì Weight_pct
         try:
             ro = self.custom_api.get_namespaced_custom_object(self.argo_group, self.argo_version, "default", self.argo_plural, self.current_service)
@@ -316,8 +320,8 @@ class OnlineCanaryEnv(gym.Env):
         reward = 0.0
         terminated = False
 
-        if current_anomalous:
-            print(f"{C.BOLD}{C.RED}   🚨 BÁO ĐỘNG LỖI! E_Ratio: {e_ratio:.2f} | L_Ratio: {l_ratio:.2f}{C.END}")
+        if was_anomalous:
+            print(f"{C.BOLD}{C.RED}   🚨 BÁO ĐỘNG LỖI (Tại thời điểm ra quyết định)! E_Ratio: {e_ratio_before:.2f} | L_Ratio: {l_ratio_before:.2f}{C.END}")
             if action == 1: reward -= 15.0; terminated = True 
             elif action == 2: reward += 10.0; terminated = True
             elif action == 0: reward -= 0.5 
@@ -363,8 +367,19 @@ class OnlineCanaryEnv(gym.Env):
 
     def _wait_for_canary_pods_ready(self, svc_name):
         print(f"{C.GREY}   ⏳ [K8s API] Chờ Canary Pods khởi động và Ready...{C.END}")
+        
+        # 1. Đợi cho tới khi K8s sinh ra Canary Hash mới (khác Stable Hash)
+        start_wait_hash = time.time()
         stable_hash, canary_hash = self._get_rollout_hashes(svc_name)
-        if stable_hash == canary_hash: return
+        while stable_hash == canary_hash and (time.time() - start_wait_hash < 30):
+            time.sleep(1)
+            stable_hash, canary_hash = self._get_rollout_hashes(svc_name)
+            
+        if stable_hash == canary_hash:
+            print(f"{C.RED}   ⚠️ [K8s API] Không thấy Canary mới xuất hiện sau 30s! Bỏ qua...{C.END}")
+            return
+            
+        # 2. Chờ cho các Pods thuộc Canary Hash đó Ready
         start_time = time.time()
         while time.time() - start_time < 90:
             try:
@@ -398,7 +413,7 @@ class OnlineCanaryEnv(gym.Env):
         
         self._graceful_reset_baseline(self.current_service)
         
-        faults = ["high_latency"]
+        faults = ["none", "high_latency", "high_error", "combined"]
         chosen_fault = random.choice(faults)
         
         fault_color = C.GREEN if chosen_fault == "none" else C.RED
