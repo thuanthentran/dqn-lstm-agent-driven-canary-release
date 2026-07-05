@@ -51,23 +51,51 @@ sequenceDiagram
 
 Hãy làm theo các bước dưới đây để tái tạo lại chính xác kiến trúc on-premise này từ con số 0.
 
-### 1. Cài đặt K8s On-Premise & Cilium CNI (Thay thế Kube-proxy)
+### 1. Chuẩn bị OS và Cài đặt K8s (Kubeadm) + Cilium CNI
 
-Đầu tiên, khởi tạo cụm Kubernetes (ví dụ: thông qua kubeadm) nhưng **bỏ qua** việc cài đặt Kube-proxy mặc định. Điều này nhằm dọn đường cho Cilium eBPF thay thế hoàn toàn vai trò của kube-proxy ở chế độ strict.
+Trước khi khởi tạo cụm, ta cần chuẩn bị OS (Ubuntu/Debian) bằng cách tắt Swap, nạp kernel modules và cài đặt `containerd`, `kubelet`, `kubeadm`, `kubectl`. Sau đó khởi tạo cụm K8s nhưng **bỏ qua** việc cài đặt Kube-proxy mặc định để dọn đường cho Cilium eBPF thay thế hoàn toàn.
 
 ```bash
-# 1. Khởi tạo K8s cluster không có Kube-proxy mặc định
-kubeadm init --skip-phases=addon/kube-proxy
+# 1. Tắt Swap (Bắt buộc cho K8s)
+sudo swapoff -a
+sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
 
-# (Chạy thêm các lệnh kubeadm join trên các node worker nếu có)
+# 2. Nạp module và cấu hình mạng (IPv4 forwarding)
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+sudo modprobe overlay && sudo modprobe br_netfilter
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+sudo sysctl --system
 
-# 2. Cài đặt Cilium CLI
+# 3. Cài đặt Containerd và Kubeadm, Kubelet, Kubectl
+sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates curl containerd
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get update && sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
+
+# 4. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định
+sudo kubeadm init --skip-phases=addon/kube-proxy
+
+# 5. Cấu hình Kubeconfig cho user hiện tại
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+# 6. Cài đặt Cilium CLI
 CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
 CLI_ARCH=amd64
 curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
 sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 
-# 3. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
+# 7. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
 cilium install \
   --set kubeProxyReplacement=true \
   --set gatewayAPI.enabled=true \
