@@ -82,10 +82,10 @@ class UserBehavior(TaskSet):
 
     tasks = {index: 1,
         setCurrency: 2,
-        browseProduct: 10,
+        browseProduct: 2,
         addToCart: 2,
         viewCart: 3,
-        checkout: 1}
+        checkout: 20}
 
 class WebsiteUser(FastHttpUser):
     tasks = [UserBehavior]

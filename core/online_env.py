@@ -11,6 +11,7 @@ import sys
 
 # --- IMPORT KUBERNETES NATIVE API ---
 from kubernetes import client, config, watch
+from core.feature_pipeline import normalize_raw_metrics
 
 EPSILON = 1e-6
 CPU_REF = 0.02 * 5
@@ -179,9 +180,9 @@ class OnlineCanaryEnv(gym.Env):
 
     def _get_metrics_from_prometheus(self):
         queries = {
-            "traffic": 'sum by (destination_workload) (rate(hubble_http_responses_total{}[30s]))',
-            "http_errors": 'sum by (destination_workload) (rate(hubble_http_responses_total{status=~"5.*"}[30s]))',
-            "latency": 'histogram_quantile(0.95, sum(rate(hubble_http_request_duration_seconds_bucket{}[30s])) by (le, destination_workload)) * 1000',
+            "traffic": f'sum by (k8s_pod_name) (rate(rpc_server_call_duration_seconds_count{{rpc_system_name="grpc", rpc_method="/hipstershop.CheckoutService/PlaceOrder", k8s_pod_name=~"{self.current_service}.*"}}[1m]))',
+            "http_errors": f'sum by (k8s_pod_name) (rate(rpc_server_call_duration_seconds_count{{rpc_system_name="grpc", rpc_method="/hipstershop.CheckoutService/PlaceOrder", rpc_response_status_code!="OK", k8s_pod_name=~"{self.current_service}.*"}}[1m]))',
+            "latency": f'histogram_quantile(0.95, sum(rate(rpc_server_call_duration_seconds_bucket{{rpc_system_name="grpc", rpc_method="/hipstershop.CheckoutService/PlaceOrder", k8s_pod_name=~"{self.current_service}.*"}}[1m])) by (le, k8s_pod_name)) * 1000',
             "cpu": f'sum(rate(container_cpu_usage_seconds_total{{namespace="default", pod=~"{self.current_service}.*", container!="POD", container!=""}}[30s]))',
             "ram": f'sum(container_memory_working_set_bytes{{namespace="default", pod=~"{self.current_service}.*", container!="POD", container!=""}})'
         }
@@ -194,40 +195,71 @@ class OnlineCanaryEnv(gym.Env):
 
         raw_traffic, raw_http, raw_latency, raw_cpu, raw_ram = map(safe_query, [queries["traffic"], queries["http_errors"], queries["latency"], queries["cpu"], queries["ram"]])
 
-        traffic_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_traffic}
-        http_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_http}
-        latency_dict = {item['metric'].get('destination_workload', 'unknown'): float(item['value'][1]) for item in raw_latency if str(item['value'][1]) != 'NaN'}
+        traffic_dict = {item['metric'].get('k8s_pod_name', 'unknown'): float(item['value'][1]) for item in raw_traffic}
+        http_dict = {item['metric'].get('k8s_pod_name', 'unknown'): float(item['value'][1]) for item in raw_http}
+        latency_dict = {item['metric'].get('k8s_pod_name', 'unknown'): float(item['value'][1]) for item in raw_latency if str(item['value'][1]) != 'NaN'}
+
+        def aggregate_by_rs(data_dict):
+            rs_data = {}
+            for pod, val in data_dict.items():
+                # Pod names format: checkoutservice-5bb66dcdd9-2lhn6 -> RS is checkoutservice-5bb66dcdd9
+                rs_name = "-".join(pod.split("-")[:-1]) if "-" in pod else pod
+                rs_data[rs_name] = rs_data.get(rs_name, 0.0) + val
+            return rs_data
+
+        def max_latency_by_rs(data_dict):
+            rs_data = {}
+            for pod, val in data_dict.items():
+                rs_name = "-".join(pod.split("-")[:-1]) if "-" in pod else pod
+                rs_data[rs_name] = max(rs_data.get(rs_name, 0.0), val)
+            return rs_data
+
+        traffic_rs = aggregate_by_rs(traffic_dict)
+        http_rs = aggregate_by_rs(http_dict)
+        latency_rs = max_latency_by_rs(latency_dict)
 
         error_rates = {}
-        for svc, total_req in traffic_dict.items():
-            err_req = http_dict.get(svc, 0.0)
+        for svc, total_req in traffic_rs.items():
+            err_req = http_rs.get(svc, 0.0)
             error_rates[svc] = err_req / (total_req + LAPLACE_BUFFER) if total_req > 0 else 0.0
 
         stable_rs_name, canary_rs_name = self._get_rollout_hashes(self.current_service)
         
         canary_err = error_rates.get(canary_rs_name, 0.0)
-        canary_lat = latency_dict.get(canary_rs_name, 0.0)
+        canary_lat = latency_rs.get(canary_rs_name, 0.0)
         
         if stable_rs_name == canary_rs_name:
             canary_err = error_rates.get(stable_rs_name, 0.0)
-            canary_lat = latency_dict.get(stable_rs_name, 0.0)
+            canary_lat = latency_rs.get(stable_rs_name, 0.0)
 
         stable_err = error_rates.get(stable_rs_name, 0.0)
+        stable_lat = latency_rs.get(stable_rs_name, 0.0)
+        total_rps = sum(traffic_rs.values()) / 60.0 # Approximate RPS
         
         return {
-            "canary_err": canary_err, 
-            "stable_err": stable_err, 
-            "canary_lat": canary_lat,
-            "cpu_cores": float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0, 
-            "ram_mb": (float(raw_ram[0]['value'][1]) if raw_ram else 0.0) / (1024 * 1024), 
+            "e_canary": canary_err, 
+            "e_stable": stable_err, 
+            "l_canary": canary_lat,
+            "l_stable": stable_lat,
+            "canary_err": canary_err, # Keep for dashboard print
+            "stable_err": stable_err, # Keep for dashboard print
+            "canary_lat": canary_lat, # Keep for dashboard print
+            "cpu": float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0,
+            "cpu_cores": float(raw_cpu[0]['value'][1]) if raw_cpu else 0.0, # Keep for dashboard print
+            "mem_mb": (float(raw_ram[0]['value'][1]) if raw_ram else 0.0) / (1024 * 1024), 
+            "ram_mb": (float(raw_ram[0]['value'][1]) if raw_ram else 0.0) / (1024 * 1024), # Keep for dashboard print
+            "rps": total_rps,
             "weight_pct": self._get_live_weight_pct_api()
         }
 
     def _process_and_normalize_features(self, raw):
+        norm = normalize_raw_metrics(raw)
         return np.array([
-            min(raw["cpu_cores"] / CPU_REF, 1.0), min(raw["ram_mb"] / MEM_REF_MB, 1.0),
-            min(raw["canary_lat"] / 1000.0, 5.0), min((raw["canary_err"] / max(raw["stable_err"], EPSILON)), MAX_RATIO) / MAX_RATIO,
-            raw["weight_pct"] / 100.0
+            norm["cpu_n"], 
+            norm["mem_n"], 
+            norm["l_ratio_n"], 
+            norm["e_ratio_n"], 
+            norm["weight_n"]
         ], dtype=np.float32)
 
     def _get_obs(self): return np.stack(list(self.history), axis=1).astype(np.float32)
@@ -260,8 +292,9 @@ class OnlineCanaryEnv(gym.Env):
         raw = self._get_metrics_from_prometheus()
         norm_channels = self._process_and_normalize_features(raw)
         
-        act_str = f"{C.GREEN}🟢 PROMOTE (1){C.END}" if action == 1 else (f"{C.RED}🔴 ABORT (2){C.END}" if action == 2 else f"{C.YELLOW}🟡 HOLD (0){C.END}")
+        act_str = f"{C.GREEN}🟢 PROMOTE [ID: 1]{C.END}" if action == 1 else (f"{C.RED}🔴 ABORT [ID: 2]{C.END}" if action == 2 else f"{C.YELLOW}🟡 HOLD [ID: 0]{C.END}")
         self._print_dashboard(f"STEP {self.current_step+1:02d}", act_str, raw, norm_channels)
+        print(f"   👁️ [Góc nhìn Agent] Dữ liệu truyền vào não bộ (Normalized State): {norm_channels}")
         
         self.history.append(norm_channels)
         obs = self._get_obs()
@@ -312,7 +345,7 @@ class OnlineCanaryEnv(gym.Env):
         print(f"{C.YELLOW}   🧹 Trả môi trường về STABLE (none)...{C.END}")
         self._run_cmd(["argo-rollouts", "abort", svc_name, "-n", "default"])
         self._apply_fault_to_rollout_api(svc_name, "none")
-        time.sleep(3) 
+        time.sleep(3)
         
         print(f"{C.YELLOW}   ⏩ Ép Promote Full 100% để dọn dẹp Canary cũ...{C.END}")
         self._run_cmd(["argo-rollouts", "promote", svc_name, "--full", "-n", "default"])
@@ -327,6 +360,31 @@ class OnlineCanaryEnv(gym.Env):
                     print(f"{C.GREEN}   ✅ [K8s API] Cụm 5 Pods STABLE đã sẵn sàng 100%!{C.END}")
                     break
         finally: w.stop()
+
+    def _wait_for_canary_pods_ready(self, svc_name):
+        print(f"{C.GREY}   ⏳ [K8s API] Chờ Canary Pods khởi động và Ready...{C.END}")
+        stable_hash, canary_hash = self._get_rollout_hashes(svc_name)
+        if stable_hash == canary_hash: return
+        start_time = time.time()
+        while time.time() - start_time < 90:
+            try:
+                pods = self.core_api.list_namespaced_pod("default", label_selector=f"app={svc_name}").items
+                canary_ready_count = 0
+                canary_total_count = 0
+                for pod in pods:
+                    owner = pod.metadata.owner_references[0].name if pod.metadata.owner_references else ""
+                    if owner == canary_hash:
+                        canary_total_count += 1
+                        if pod.status.phase == "Running" and pod.status.conditions:
+                            for cond in pod.status.conditions:
+                                if cond.type == "Ready" and cond.status == "True":
+                                    canary_ready_count += 1
+                if canary_total_count > 0 and canary_ready_count == canary_total_count:
+                    print(f"{C.GREEN}   ✅ [K8s API] Toàn bộ Canary Pods đã Ready ({canary_ready_count}/{canary_total_count})! Bắt đầu nạp Traffic...{C.END}")
+                    return
+            except Exception as e: pass
+            time.sleep(2)
+        print(f"{C.RED}   ⚠️ [K8s API] Hết thời gian chờ Canary Pods (Vẫn tiếp tục)!{C.END}")
 
     def reset(self, seed=None, options=None):   
         super().reset(seed=seed)
@@ -347,10 +405,12 @@ class OnlineCanaryEnv(gym.Env):
         print(f"\n{C.BOLD}🚀 BƠM KỊCH BẢN CANARY: {fault_color}[{chosen_fault.upper()}]{C.END}")
         
         self._apply_fault_to_rollout_api(self.current_service, chosen_fault)
-        self._wait_for_weight_change_api(100.0) 
+        self._wait_for_weight_change_api(100.0)
+        self._wait_for_canary_pods_ready(self.current_service)
         
         self._start_locust()
         self._debug_cluster_health() # Nội soi trạng thái mồi
+
         self._wait_for_prometheus(35, "STEP 00") 
 
         raw = self._get_metrics_from_prometheus()

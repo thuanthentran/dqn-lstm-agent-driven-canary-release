@@ -1,7 +1,7 @@
 global:
   # Cập nhật lại Repo URL chính xác của bạn
   repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-  targetRevision: main
+  targetRevision: grafanabeyla
   destinationNamespace: default
 
 services:

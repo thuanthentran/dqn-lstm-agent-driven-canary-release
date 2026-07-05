@@ -25,5 +25,5 @@ spec:
           canary_hash: "{{args.canary-hash}}"
     # Thành công khi API trả về biến action = 1 (Promote)
     successCondition: result.action == 1 
-    # Thất bại (Rollback) khi API trả về action = 0
-    failureCondition: result.action == 0
+    # Thất bại (Rollback) khi API trả về action = 2 (Abort)
+    failureCondition: result.action == 2

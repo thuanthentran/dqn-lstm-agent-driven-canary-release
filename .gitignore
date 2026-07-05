@@ -1,6 +1,22 @@
 check_gpu.py
-core/__pycache__/
 evaluate_random.py
 install_pytorch_gpu.py
-logs/
 test_rewards.py
+
+# Logs
+logs/
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Online training artifacts
+models/*_online*.zip
+models/*_online*.pkl
+models/*_online_best*
+
+# Editor and OS
+.vscode/
+.DS_Store

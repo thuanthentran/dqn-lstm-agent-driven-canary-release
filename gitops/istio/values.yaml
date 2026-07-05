@@ -1,3 +1,0 @@
-meshConfig:
-  accessLogFile: /dev/stdout # Bật access log của Istio để debug traffic Canary
-  enableAutoMtls: true       # Bật tự động mã hóa kết nối nội bộ mTLS giữa các microservices
