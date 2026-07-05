@@ -1,4 +1,0 @@
-- `[x]` Create CiliumNetworkPolicy for checkoutservice
-- `[x]` Apply the policy and generate traffic
-- `[x]` Verify Prometheus metrics for checkoutservice L7 latency
-- `[/]` Run test agent and verify it detects high latency and aborts
