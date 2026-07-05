@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beyla
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: beyla
+rules:
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: beyla
+subjects:
+  - kind: ServiceAccount
+    name: beyla
+    namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: beyla
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beyla-config
+  namespace: default
+data:
+  beyla-config.yml: |
+    attributes:
+      kubernetes:
+        enable: true
+    prometheus_export:
+      port: 9090
+      path: /metrics
+    discovery:
+      services:
+        - k8s_namespace: "default"
+    # Optional: reduce noise by only observing gRPC and HTTP
+    routes:
+      unmatched: heuristic
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beyla
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: beyla
+  template:
+    metadata:
+      labels:
+        app: beyla
+    spec:
+      serviceAccountName: beyla
+      hostPID: true
+      containers:
+        - name: beyla
+          image: grafana/beyla:latest
+          securityContext:
+            privileged: true
+          env:
+            - name: BEYLA_CONFIG_PATH
+              value: "/config/beyla-config.yml"
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          ports:
+            - containerPort: 9090
+              name: metrics
+      volumes:
+        - name: config
+          configMap:
+            name: beyla-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: beyla
+  namespace: default
+  labels:
+    app: beyla
+spec:
+  ports:
+    - port: 9090
+      targetPort: metrics
+      name: metrics
+  selector:
+    app: beyla
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: beyla
+  namespace: default
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: beyla
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
