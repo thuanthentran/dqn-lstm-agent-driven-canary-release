@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 def create_agent_deployment_dict(name, namespace, spec):
-    image = spec.get("image", "thuanthentran/rl-canary-agent:latest")
+    image = spec.get("image", "ghcr.io/thuanthentran/agent:latest")
     replicas = spec.get("replicas", 1)
     model_path = spec.get("modelPath", "models/ppo_lstm_offline_best.zip")
     prometheus_url = spec.get("prometheusUrl")

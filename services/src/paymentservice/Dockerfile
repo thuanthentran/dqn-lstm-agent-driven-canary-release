@@ -43,3 +43,4 @@ COPY . .
 EXPOSE 50051
 
 ENTRYPOINT [ "node", "index.js" ]
+# force rebuild
