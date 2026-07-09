@@ -1,0 +1,11 @@
+apiVersion: rl.thuanthentran.io/v1alpha1
+kind: RLAgent
+metadata:
+  name: canary-eval-agent
+  namespace: default
+spec:
+  image: "thuanthentran/rl-canary-agent:latest"
+  modelPath: "models/ppo_lstm_offline_best.zip"
+  prometheusUrl: "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090"
+  replicas: 1
+  port: 8000

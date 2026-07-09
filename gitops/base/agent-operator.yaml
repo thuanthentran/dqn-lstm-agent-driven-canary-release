@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rl-agent-operator
+  namespace: default
+  labels:
+    app: rl-agent-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rl-agent-operator
+  template:
+    metadata:
+      labels:
+        app: rl-agent-operator
+    spec:
+      serviceAccountName: rl-agent-operator-sa
+      containers:
+        - name: operator
+          image: thuanthentran/rl-canary-operator:latest
+          imagePullPolicy: Always
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rl-agent-operator-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rl-agent-operator-role
+rules:
+  # Framework: kopf
+  - apiGroups: ["kopf.dev"]
+    resources: ["clusterkopfpeerings", "kopfpeerings"]
+    verbs: ["list", "watch", "patch", "get"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["list", "watch"]
+  # Application: RLAgent
+  - apiGroups: ["rl.thuanthentran.io"]
+    resources: ["rlagents", "rlagents/status", "rlagents/scale"]
+    verbs: ["*"]
+  # Application: Create Deployments & Services
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rl-agent-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rl-agent-operator-role
+subjects:
+  - kind: ServiceAccount
+    name: rl-agent-operator-sa
+    namespace: default
