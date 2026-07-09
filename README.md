@@ -81,27 +81,42 @@ echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.
 sudo apt-get update && sudo apt-get install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
 
-# 4. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định
-sudo kubeadm init --skip-phases=addon/kube-proxy
+# 4. Tạo mạng NAT ảo (Linux Bridge) để cấp IP tĩnh cho K8s Node
+# Giúp K8s API Server sống khỏe, không bị Crash khi Laptop bị đổi mạng WiFi
+sudo nmcli connection add type bridge autoconnect yes con-name k8s-br0 ifname k8s-br0
+sudo nmcli connection modify k8s-br0 ipv4.addresses 192.168.100.1/24 ipv4.method manual ipv6.method disabled
+sudo nmcli connection up k8s-br0
 
-# 5. Cấu hình Kubeconfig cho user hiện tại
+# 5. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định và bind vào IP tĩnh
+sudo kubeadm init --apiserver-advertise-address=192.168.100.1 --skip-phases=addon/kube-proxy
+
+# 6. Cấu hình Kubeconfig cho user hiện tại
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
 
-# 6. Cài đặt Cilium CLI
+# 7. Cài đặt Cilium CLI
 CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
 CLI_ARCH=amd64
 curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
 sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 
-# 7. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
+# 8. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
 cilium install \
   --set kubeProxyReplacement=true \
   --set gatewayAPI.enabled=true \
   --set hubble.enabled=true \
   --set hubble.metrics.enableOpenMetrics=true \
   --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}"
+
+# 9. Cài đặt ArgoCD (GitOps Controller)
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+# Cài đặt ArgoCD CLI (Tùy chọn để quản lý tiện hơn)
+curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+rm argocd-linux-amd64
 ```
 
 ### 2. Triển khai Monitoring (Prometheus) & Grafana Beyla (eBPF)

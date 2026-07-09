@@ -3,9 +3,9 @@ name: Build and Push Microservices
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
     paths:
-      - 'services/src/**'
+      - 'services/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,6 +35,8 @@ jobs:
             productcatalogservice: 'services/src/productcatalogservice/**'
             recommendationservice: 'services/src/recommendationservice/**'
             shippingservice: 'services/src/shippingservice/**'
+            agent: 'services/agent/**'
+            controller: 'services/controller/**'
   # Job 2: Build và Push song song các service đã thay đổi
   build:
     needs: changes
@@ -64,7 +66,19 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
-          context: ${{ matrix.service == 'cartservice' && './services/src/cartservice/src' || format('./services/src/{0}', matrix.service) }}
-          file: ${{ matrix.service == 'cartservice' && './services/src/cartservice/src/Dockerfile' || format('./services/src/{0}/Dockerfile', matrix.service) }}
+          context: >-
+            ${{ 
+              matrix.service == 'cartservice' && './services/src/cartservice/src' ||
+              matrix.service == 'agent' && './services/agent' ||
+              matrix.service == 'controller' && './services/controller' ||
+              format('./services/src/{0}', matrix.service)
+            }}
+          file: >-
+            ${{
+              matrix.service == 'cartservice' && './services/src/cartservice/src/Dockerfile' ||
+              matrix.service == 'agent' && './services/agent/Dockerfile' ||
+              matrix.service == 'controller' && './services/controller/Dockerfile' ||
+              format('./services/src/{0}/Dockerfile', matrix.service)
+            }}
           push: true
           tags: ${{ steps.prep.outputs.image_name }}:latest

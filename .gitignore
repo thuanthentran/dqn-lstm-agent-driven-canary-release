@@ -20,3 +20,5 @@ models/*_online_best*
 # Editor and OS
 .vscode/
 .DS_Store
+
+*.tar.gz
