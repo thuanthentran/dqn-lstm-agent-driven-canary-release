@@ -2,7 +2,7 @@ name: Build and Push Microservices
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "grafanabeyla" ]
     paths:
       - 'services/**'
   workflow_dispatch:
