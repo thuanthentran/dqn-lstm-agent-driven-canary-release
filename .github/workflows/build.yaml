@@ -30,7 +30,6 @@ jobs:
             currencyservice: 'services/src/currencyservice/**'
             emailservice: 'services/src/emailservice/**'
             frontend: 'services/src/frontend/**'
-            loadgenerator: 'services/src/loadgenerator/**'
             paymentservice: 'services/src/paymentservice/**'
             productcatalogservice: 'services/src/productcatalogservice/**'
             recommendationservice: 'services/src/recommendationservice/**'
