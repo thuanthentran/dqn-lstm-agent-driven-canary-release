@@ -16,7 +16,7 @@ spec:
     # Sử dụng Webhook để đấm thẳng vào API của Agent
     provider:
       web:
-        url: "http://agent-service.default.svc.cluster.local:8000/api/v1/decision"
+        url: "http://canary-eval-agent-service.default.svc.cluster.local:8000/api/v1/decision"
         method: POST
         # Gói tên service và mã hash thành JSON gửi cho Agent
         jsonBody:

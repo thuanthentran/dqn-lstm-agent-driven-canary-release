@@ -18,7 +18,7 @@ spec:
       serviceAccountName: rl-agent-operator-sa
       containers:
         - name: operator
-          image: thuanthentran/rl-canary-operator:latest
+          image: ghcr.io/thuanthentran/controller:latest
           imagePullPolicy: Always
 ---
 apiVersion: v1

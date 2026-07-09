@@ -23,7 +23,7 @@ spec:
               properties:
                 image:
                   type: string
-                  description: "Docker image for the agent webhook (default: thuanthentran/rl-canary-agent:latest)"
+                  description: "Docker image for the agent webhook (default: ghcr.io/thuanthentran/agent:latest)"
                 modelPath:
                   type: string
                   description: "Path to the model inside the container (default: models/ppo_lstm_offline_best.zip)"
