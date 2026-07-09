@@ -68,7 +68,7 @@ jobs:
           context: >-
             ${{ 
               matrix.service == 'cartservice' && './services/src/cartservice/src' ||
-              matrix.service == 'agent' && './services/agent' ||
+              matrix.service == 'agent' && '.' ||
               matrix.service == 'controller' && './services/controller' ||
               format('./services/src/{0}', matrix.service)
             }}

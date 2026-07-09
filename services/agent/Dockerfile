@@ -5,7 +5,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # 1. Copy file requirements từ thư mục deploy vào trước để cache layer
-COPY deploy/requirements.txt .
+COPY services/agent/requirements.txt .
 
 # 2. Cài đặt các thư viện (Sử dụng --index-url để lấy bản CPU cho nhẹ nếu không cần GPU)
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
@@ -18,7 +18,7 @@ COPY core/ ./core/
 COPY models/ ./models/
 
 # 5. Copy file main.py (API Service) vào root của WORKDIR
-COPY deploy/main.py .
+COPY services/agent/main.py .
 
 # 6. Thiết lập biến môi trường để Python nhận diện thư mục /app là một package
 ENV PYTHONPATH=/app
