@@ -1,0 +1,50 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: rlagents.rl.thuanthentran.io
+spec:
+  group: rl.thuanthentran.io
+  names:
+    kind: RLAgent
+    listKind: RLAgentList
+    plural: rlagents
+    singular: rlagent
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                image:
+                  type: string
+                  description: "Docker image for the agent webhook (default: thuanthentran/rl-canary-agent:latest)"
+                modelPath:
+                  type: string
+                  description: "Path to the model inside the container (default: models/ppo_lstm_offline_best.zip)"
+                prometheusUrl:
+                  type: string
+                  description: "URL for the Prometheus server"
+                replicas:
+                  type: integer
+                  minimum: 1
+                  description: "Number of replicas for the agent deployment"
+                port:
+                  type: integer
+                  description: "Port for the webhook service (default: 8000)"
+              required:
+                - prometheusUrl
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
