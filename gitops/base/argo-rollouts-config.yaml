@@ -4,8 +4,6 @@ metadata:
   name: argo-rollouts-config
   namespace: argo-rollouts
 data:
-  rollout-controller-config: |
-    trafficRoutingPlugins:
-      argoproj-labs/gatewayAPI:
-        command: /plugins/gatewayapi-plugin-linux-amd64
-        args: ["-log-level", "debug"]
+  trafficRouterPlugins: |-
+    - name: "argoproj-labs/gatewayAPI"
+      location: "file:///plugins/gatewayapi-plugin-linux-amd64"
