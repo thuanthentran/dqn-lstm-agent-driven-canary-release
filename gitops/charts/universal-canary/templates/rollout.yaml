@@ -51,8 +51,41 @@ spec:
             
       steps:
       - setWeight: 20
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
       - setWeight: 50
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
       - setWeight: 80
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: universal-rl-agent-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
