@@ -63,6 +63,8 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Latest
+          - name: target-weight
+            value: "20"
       - setWeight: 50
       - analysis:
           templates:
@@ -76,6 +78,8 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Latest
+          - name: target-weight
+            value: "50"
       - setWeight: 80
       - analysis:
           templates:
@@ -89,3 +93,5 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Latest
+          - name: target-weight
+            value: "80"

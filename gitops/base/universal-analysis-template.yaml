@@ -11,6 +11,7 @@ spec:
   - name: service-name
   - name: stable-hash
   - name: canary-hash
+  - name: target-weight
   metrics:
   - name: rl-agent-decision
     # Sử dụng Webhook để đấm thẳng vào API của Agent
@@ -23,6 +24,7 @@ spec:
           service: "{{args.service-name}}"
           stable_hash: "{{args.stable-hash}}"
           canary_hash: "{{args.canary-hash}}"
+          target_weight: "{{args.target-weight}}"
     # Thành công khi API trả về biến action = 1 (Promote)
     successCondition: result.action == 1 
     # Thất bại (Rollback) khi API trả về action = 2 (Abort)
