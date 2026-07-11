@@ -83,12 +83,12 @@ sudo apt-mark hold kubelet kubeadm kubectl
 
 # 4. Tạo mạng NAT ảo (Linux Bridge) để cấp IP tĩnh cho K8s Node
 # Giúp K8s API Server sống khỏe, không bị Crash khi Laptop bị đổi mạng WiFi
-sudo nmcli connection add type bridge autoconnect yes con-name k8s-br0 ifname k8s-br0
-sudo nmcli connection modify k8s-br0 ipv4.addresses 192.168.100.1/24 ipv4.method manual ipv6.method disabled
-sudo nmcli connection up k8s-br0
+# sudo nmcli connection add type bridge autoconnect yes con-name k8s-br0 ifname k8s-br0
+# sudo nmcli connection modify k8s-br0 ipv4.addresses 192.168.100.1/24 ipv4.method manual ipv6.method disabled
+# sudo nmcli connection up k8s-br0
 
 # 5. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định và bind vào IP tĩnh
-sudo kubeadm init --apiserver-advertise-address=192.168.100.1 --skip-phases=addon/kube-proxy
+sudo kubeadm init --skip-phases=addon/kube-proxy
 
 # 6. Cấu hình Kubeconfig cho user hiện tại
 mkdir -p $HOME/.kube
@@ -101,7 +101,11 @@ CLI_ARCH=amd64
 curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz
 sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
 
-# 8. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
+# 8. Cài đặt CRDs cho K8s Gateway API (BẮT BUỘC cài trước Cilium)
+kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
+  { kubectl kustomize "github.com/kubernetes-sigs/gateway-api/config/crd/experimental?ref=v1.1.0" | kubectl apply -f -; }
+
+# 9. Cài đặt Cilium qua Helm/CLI (Kích hoạt Gateway API)
 cilium install \
   --set kubeProxyReplacement=true \
   --set gatewayAPI.enabled=true \
@@ -109,7 +113,7 @@ cilium install \
   --set hubble.metrics.enableOpenMetrics=true \
   --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}"
 
-# 9. Cài đặt ArgoCD (GitOps Controller)
+# 10. Cài đặt ArgoCD (GitOps Controller)
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
@@ -117,19 +121,33 @@ kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/st
 curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
 sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
 rm argocd-linux-amd64
+
+# 11. Triển khai tự động toàn bộ hệ thống (One-click GitOps)
+# Thay vì phải cài đặt thủ công từng thành phần ở các phần dưới, bạn chỉ cần Apply file root-app:
+# Nó sẽ dùng cơ chế Sync Waves để tự động cài đặt theo đúng thứ tự: Monitoring -> Base (CRDs, MetalLB) -> Microservices
+kubectl apply -f root-app.yaml
 ```
+*(Lưu ý: Nếu bạn dùng lệnh `kubectl apply -f root-app.yaml` ở trên, bạn có thể hoàn toàn bỏ qua các lệnh cài đặt bằng Helm/Kubectl thủ công ở Phần 2 và Phần 3 bên dưới, vì Argo CD sẽ tự động lo hết cho bạn).*
+
 
 ### 2. Triển khai Monitoring (Prometheus) & Grafana Beyla (eBPF)
 
 Thay vì phải tiêm các sidecar nặng nề (như Istio) vào từng Pod, chúng ta sử dụng **Grafana Beyla** để tự động đo đạc ứng dụng trực tiếp từ tầng Kernel thông qua công nghệ eBPF.
 
+**Lưu ý quan trọng chuẩn bị Node:**
+- **Tắt Swap vĩnh viễn:** Sửa file `/etc/fstab` và thêm `#` trước dòng cấu hình swap, sau đó chạy `sudo swapoff -a`.
+- **Cấu hình Shared Mount cho Root (`/`):** node-exporter và Beyla cần quyền truy cập root mount. Bạn cần chạy lệnh `sudo mount --make-rshared /` trên các worker nodes (hoặc cài đặt thành systemd service để tự động chạy khi khởi động lại).
+
 ```bash
-# 1. Cài đặt Kube-Prometheus-Stack (Grafana + Prometheus)
+# 1. Cài đặt Local Path Provisioner (Cung cấp StorageClass "local-path" cho Prometheus/Grafana)
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.28/deploy/local-path-storage.yaml
+
+# 2. Cài đặt Kube-Prometheus-Stack (Grafana + Prometheus)
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 helm install monitoring prometheus-community/kube-prometheus-stack -n monitoring --create-namespace
 
-# 2. Cài đặt Grafana Beyla (eBPF Auto-instrumentation)
+# 3. Cài đặt Grafana Beyla (eBPF Auto-instrumentation)
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
 helm install beyla grafana/beyla -n monitoring \
@@ -137,18 +155,14 @@ helm install beyla grafana/beyla -n monitoring \
   --set global.prometheus.serviceMonitor.enabled=true
 ```
 
-*(Lưu ý: Các file cấu hình chi tiết cho Beyla ServiceMonitor và Prometheus scraping đã được lưu sẵn trong thư mục `gitops/` của dự án).*
+*(Lưu ý: Các file cấu hình chi tiết cho Beyla ServiceMonitor, Kube-Prometheus-Stack và Local-Path Provisioner qua GitOps đã được lưu sẵn trong thư mục `gitops/monitoring/` của dự án).*
 
 ### 3. Cài đặt Argo Rollouts & Gateway API Plugin
 
 Argo Rollouts đóng vai trò quản lý vòng đời của các đợt phát hành Canary. Để nó có thể điều khiển được tính năng chia traffic của Cilium Gateway API, ta cần phải nạp thêm một Plugin chuyên dụng.
 
 ```bash
-# 1. Cài đặt CRDs cho K8s Gateway API
-kubectl get crd gateways.gateway.networking.k8s.io &> /dev/null || \
-  { kubectl kustomize "github.com/kubernetes-sigs/gateway-api/config/crd/experimental?ref=v1.1.0" | kubectl apply -f -; }
-
-# 2. Cài đặt Argo Rollouts
+# 1. Cài đặt Argo Rollouts
 kubectl create namespace argo-rollouts
 kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
 
