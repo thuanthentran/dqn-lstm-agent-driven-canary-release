@@ -100,19 +100,19 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
     c_hash = payload.canary_hash
     s_hash = payload.stable_hash
 
-    # Cập nhật query chuẩn Istio
+    # Cập nhật query chuẩn Grafana Beyla
     tasks = [
-        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{c_hash}.*\",response_code=~\"5.*\"}}[1m])) / clamp_min(sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{c_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{s_hash}.*\",response_code=~\"5.*\"}}[1m])) / clamp_min(sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{s_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        # Istio Latency tính bằng ms, chia 1000 để ra giây (seconds)
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{c_hash}.*\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{s_hash}.*\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{c_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\",pod=~\".*{s_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\",http_response_status_code=~\"5.*\"}}[1m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\",http_response_status_code=~\"5.*\"}}[1m])) / clamp_min(sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        # Beyla Latency tính bằng giây (seconds), nên không cần chia 1000
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         # CPU/Mem vẫn phải lấy từ cAdvisor của K8s dựa vào pod hash
         _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",destination_service=~\"{svc}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
+        _prom_query_range(f"sum(rate(http_server_request_duration_seconds_count{{k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
     ]
 
     results = await asyncio.gather(*tasks)
