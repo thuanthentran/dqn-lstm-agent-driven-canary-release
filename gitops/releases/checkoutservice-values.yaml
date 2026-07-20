@@ -25,7 +25,7 @@ env:
   - name: PORT
     value: "5050"
   - name: FAULT_SCENARIO
-    value: "none" # Đổi tạm thành high_error để test canary
+    value: "high_error" # Đổi tạm thành high_error để test canary
   - name: PRODUCT_CATALOG_SERVICE_ADDR
     value: "productcatalogservice:3550"
   - name: SHIPPING_SERVICE_ADDR
