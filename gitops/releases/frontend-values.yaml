@@ -9,19 +9,19 @@ env:
   - name: PORT
     value: "8080"
   - name: PRODUCT_CATALOG_SERVICE_ADDR
-    value: "cilium-gateway-productcatalogservice-gateway:80"
+    value: "productcatalogservice:3550"
   - name: CURRENCY_SERVICE_ADDR
-    value: "cilium-gateway-currencyservice-gateway:80"
+    value: "currencyservice:7000"
   - name: CART_SERVICE_ADDR
-    value: "cilium-gateway-cartservice-gateway:80"
+    value: "cartservice:7070"
   - name: RECOMMENDATION_SERVICE_ADDR
-    value: "cilium-gateway-recommendationservice-gateway:80"
+    value: "recommendationservice:8080"
   - name: SHIPPING_SERVICE_ADDR
-    value: "cilium-gateway-shippingservice-gateway:80"
+    value: "shippingservice:50051"
   - name: CHECKOUT_SERVICE_ADDR
-    value: "cilium-gateway-checkoutservice-gateway:80"
+    value: "checkoutservice:5050"
   - name: AD_SERVICE_ADDR
-    value: "cilium-gateway-adservice-gateway:80"
+    value: "adservice:9555"
   - name: ENABLE_PROFILER
     value: "0"
   - name: SHOPPING_ASSISTANT_SERVICE_ADDR
