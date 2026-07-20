@@ -104,8 +104,8 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
     tasks = [
         # e_canary: Error Ratio cho Canary
         # Lỗi có thể là classification="failure"
-        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m]))) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m]))) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m])) or vector(0)) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m])) or vector(0)) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
         # l_canary: P95 Latency (Linkerd reports in ms, divide by 1000 for seconds)
         _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
