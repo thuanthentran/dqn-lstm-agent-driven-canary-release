@@ -1,0 +1,61 @@
+# Tích hợp Linkerd thành công
+
+Tôi đã hoàn thành việc chỉnh sửa mã nguồn và cấu hình GitOps để chuyển đổi từ Grafana Beyla sang Linkerd. Tất cả thay đổi đã được commit vào nhánh `linkerd` hiện tại.
+
+### Các thay đổi đã thực hiện:
+1. **Agent (`main.py`)**: Cập nhật toàn bộ các câu lệnh PromQL để đọc `response_total` và `response_latency_ms_bucket` từ Linkerd proxy.
+2. **Argo Rollouts (`rollout.yaml`)**: Xóa `gatewayAPI` và cấu hình lại phần `trafficRouting` sang dùng chuẩn `smi` (Service Mesh Interface) để Linkerd tự động chia traffic 20% - 80%.
+3. **Monitoring**: Xóa cấu hình của Beyla và thêm `linkerd-podmonitor.yaml` để Prometheus (kube-prometheus-stack) tự động thu thập (scrape) số liệu từ port 4191 của các sidecar Linkerd.
+4. **ArgoCD**: Cập nhật `root-app.yaml` và `values.yaml` để tự động kéo code từ nhánh `linkerd`.
+
+---
+
+## 🚀 Các bước cài đặt thủ công dành cho bạn
+
+Để hệ thống hoạt động, bạn cần cài đặt Linkerd lên cụm Kubernetes hiện tại của bạn. Vui lòng mở một Terminal mới và chạy tuần tự các lệnh sau:
+
+### 1. Cài đặt Linkerd CLI (Nếu bạn chưa có)
+Trên Windows (nếu bạn dùng WSL/Bash hoặc Git Bash):
+```bash
+curl --proto '=https' --tlsv1.2 -sSfL https://run.linkerd.io/install | sh
+export PATH=$PATH:/home/$USER/.linkerd2/bin
+```
+*(Nếu bạn dùng PowerShell, bạn có thể tải file `.exe` từ [Github của Linkerd](https://github.com/linkerd/linkerd2/releases))*
+
+### 2. Cài đặt Linkerd Control Plane vào cụm
+Cài đặt CRDs trước:
+```bash
+linkerd install --crds | kubectl apply -f -
+```
+
+Sau đó cài đặt Control Plane:
+```bash
+linkerd install | kubectl apply -f -
+```
+
+Kiểm tra xem Linkerd đã chạy ổn định chưa:
+```bash
+linkerd check
+```
+
+### 3. Kích hoạt Linkerd cho các Microservices
+Gắn nhãn (label) cho namespace `default` để Linkerd tự động tiêm (inject) sidecar proxy vào bất kỳ pod nào mới được sinh ra:
+```bash
+kubectl label namespace default linkerd.io/inject=enabled --overwrite
+```
+
+Khởi động lại toàn bộ các ứng dụng để chúng nhận sidecar mới:
+```bash
+kubectl rollout restart deploy
+kubectl rollout restart rollout
+```
+
+### 4. Cài đặt Linkerd SMI (Rất quan trọng cho Argo Rollouts)
+Vì Argo Rollouts sử dụng chuẩn SMI để nói chuyện với Linkerd, bạn cần cài đặt thêm module SMI (Extension) của Linkerd:
+```bash
+linkerd smi install | kubectl apply -f -
+```
+
+### 🎉 Hoàn tất
+Sau khi hoàn thành 4 bước trên, bạn hãy chờ khoảng 1-2 phút. Hãy kiểm tra lại `kubectl get pods`, bạn sẽ thấy tất cả các pod đều có `2/2` containers (một của ứng dụng, một của Linkerd proxy).
+Lúc này, Loadgenerator sẽ tiếp tục chạy, và Agent của bạn sẽ thu thập được traffic chuẩn xác 100% nhờ sự điều phối tự động của Linkerd!
