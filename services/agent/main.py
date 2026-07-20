@@ -102,17 +102,19 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
 
     # Cập nhật query chuẩn Grafana Beyla
     tasks = [
-        _prom_query_range(f"(sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\",http_response_status_code=~\"5.*\"}}[1m])) or sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\",rpc_response_status_code!=\"OK\"}}[1m]))) / clamp_min(sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        _prom_query_range(f"(sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\",http_response_status_code=~\"5.*\"}}[1m])) or sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\",rpc_response_status_code!=\"OK\"}}[1m]))) / clamp_min(sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        # Beyla Latency tính bằng giây (seconds), nên không cần chia 1000
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate({{__name__=~\"(http_server_request_duration_seconds_bucket|rpc_server_call_duration_seconds_bucket)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate({{__name__=~\"(http_server_request_duration_seconds_bucket|rpc_server_call_duration_seconds_bucket)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{c_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\",k8s_pod_name=~\".*{s_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        # e_canary: Error Ratio cho Canary
+        # Lỗi có thể là classification="failure"
+        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m]))) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m]))) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        # l_canary: P95 Latency (Linkerd reports in ms, divide by 1000 for seconds)
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         # CPU/Mem vẫn phải lấy từ cAdvisor của K8s dựa vào pod hash
         _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate({{__name__=~\"(http_server_request_duration_seconds_count|rpc_server_call_duration_seconds_count)\",k8s_namespace_name=\"{ns}\",k8s_deployment_name=~\"{svc}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
+        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\"{svc}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
     ]
 
     results = await asyncio.gather(*tasks)
