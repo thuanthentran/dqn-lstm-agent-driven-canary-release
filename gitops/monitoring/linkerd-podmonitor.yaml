@@ -6,6 +6,8 @@ metadata:
   labels:
     release: kube-prometheus-stack
 spec:
+  namespaceSelector:
+    any: true
   selector:
     matchExpressions:
       - key: linkerd.io/control-plane-ns
