@@ -189,26 +189,41 @@ async def get_decision(payload: WebhookPayload):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
 
-    # Chốt chặn Data
-    if observed_weight > 0 and latest_canary_rps == 0.0:
-        return {"action": 2, "decision": "Rollback"} # 2 = Rollback
+    # Nếu dữ liệu chưa thu thập đủ (Prometheus chưa kịp scrape), trả về trạng thái chờ
     if not data_complete:
         return {"action": 0, "decision": "Running"}  # 0 = Hold/Running
+
+    # Chốt chặn Data: Nếu đã có dữ liệu đầy đủ nhưng RPS canary = 0, Rollback ngay
+    if observed_weight > 0 and latest_canary_rps == 0.0:
+        return {"action": 2, "decision": "Rollback"} # 2 = Rollback
 
     # Inference bằng RecurrentPPO (SB3)
     input_tensor = np.array([data], dtype=np.float32)
     action_val, _states = model.predict(input_tensor, deterministic=True)
-    action = int(action_val)
-
+    action_val = int(action_val)
+    
     # Đánh giá Guard
     guard_decision, _ = _evaluate_safety_guard(latest_raw, observed_weight)
+    
     if guard_decision == "Rollback":
-        action = 2
-    elif guard_decision == "Running" and action == 1:
-        action = 0 # Ép dừng lại không cho Promote nếu hơi nguy hiểm
+        action_val = 2
+    elif guard_decision == "Running" and action_val == 0:
+        action_val = 1 # Ép dừng lại (Stay) không cho Promote nếu hơi nguy hiểm
+        
+    decision = "Stay"
+    api_action = 0
+    
+    if action_val == 2:
+        decision = "Rollback"
+        api_action = 2
+    elif action_val == 0:
+        decision = "Promote"
+        api_action = 1
+    elif action_val == 1:
+        decision = "Stay"
+        api_action = 0
 
-    # TRẢ VỀ ĐÚNG FORMAT CHO ARGO ROLLOUTS (1 = Success/Promote, 0 = Hold, 2 = Fail)
-    return {"action": action}
+    return {"action": api_action, "decision": decision}
 
 @app.get("/health")
 def health():

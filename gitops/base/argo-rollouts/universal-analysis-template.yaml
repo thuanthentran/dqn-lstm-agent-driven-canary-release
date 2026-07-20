@@ -15,6 +15,9 @@ spec:
   metrics:
   - name: rl-agent-decision
     initialDelay: 30s
+    interval: 10s
+    count: 30
+    inconclusiveLimit: 30
     # Sử dụng Webhook để đấm thẳng vào API của Agent
     provider:
       web:
