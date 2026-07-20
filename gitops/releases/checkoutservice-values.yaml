@@ -27,14 +27,14 @@ env:
   - name: FAULT_SCENARIO
     value: "high_error" # Đổi tạm thành high_error để test canary
   - name: PRODUCT_CATALOG_SERVICE_ADDR
-    value: "cilium-gateway-productcatalogservice-gateway:80"
+    value: "productcatalogservice:3550"
   - name: SHIPPING_SERVICE_ADDR
-    value: "cilium-gateway-shippingservice-gateway:80"
+    value: "shippingservice:50051"
   - name: PAYMENT_SERVICE_ADDR
-    value: "cilium-gateway-paymentservice-gateway:80"
+    value: "paymentservice:50051"
   - name: EMAIL_SERVICE_ADDR
-    value: "cilium-gateway-emailservice-gateway:80"
+    value: "emailservice:5000"
   - name: CURRENCY_SERVICE_ADDR
-    value: "cilium-gateway-currencyservice-gateway:80"
+    value: "currencyservice:7000"
   - name: CART_SERVICE_ADDR
-    value: "cilium-gateway-cartservice-gateway:80"
+    value: "cartservice:7070"
