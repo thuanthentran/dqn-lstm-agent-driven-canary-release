@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: grafanabeyla
+    targetRevision: linkerd
     path: gitops/monitoring
   destination:
     server: 'https://kubernetes.default.svc'
@@ -33,7 +33,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: grafanabeyla
+    targetRevision: linkerd
     path: gitops/charts/bootstrap
   destination:
     server: 'https://kubernetes.default.svc'
