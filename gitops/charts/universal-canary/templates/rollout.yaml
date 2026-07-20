@@ -42,12 +42,11 @@ spec:
       canaryService: {{ .Values.serviceName }}-canary
       stableService: {{ .Values.serviceName }}-stable
       
-      # PATCH: Chuyển từ Istio sang Gateway API
+      # PATCH: Chuyển từ Gateway API sang SMI cho Linkerd
       trafficRouting:
-        plugins:
-          argoproj-labs/gatewayAPI:
-            httpRoute: {{ .Values.serviceName }}-route
-            namespace: default
+        smi:
+          rootService: {{ .Values.serviceName }}
+          trafficSplitName: {{ .Values.serviceName }}-split
             
       steps:
       - setWeight: 20
