@@ -1,30 +1,6 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: monitoring-app
-  namespace: argocd
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-spec:
-  project: default
-  source:
-    repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: linkerd
-    path: gitops/monitoring
-  destination:
-    server: 'https://kubernetes.default.svc'
-    namespace: monitoring
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: false
-    syncOptions:
-      - CreateNamespace=true
-      - ServerSideApply=true
----
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
   name: bootstrap-prod
   namespace: argocd
   annotations:
@@ -58,7 +34,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: grafanabeyla
+    targetRevision: linkerd
     path: gitops/charts/bootstrap
     helm:
       parameters:
