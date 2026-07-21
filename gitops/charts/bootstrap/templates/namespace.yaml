@@ -3,5 +3,5 @@ kind: Namespace
 metadata:
   name: {{ .Values.global.destinationNamespace }}
   labels:
-    # TỰ ĐỘNG HÓA GITSOP: Khai báo cứng nhãn Istio vào Git
-    istio-injection: enabled
+    # TỰ ĐỘNG HÓA GITSOP: Khai báo cứng nhãn Linkerd vào Git
+    linkerd.io/inject: enabled
