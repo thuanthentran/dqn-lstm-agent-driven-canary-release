@@ -1,0 +1,12 @@
+apiVersion: split.smi-spec.io/v1alpha1
+kind: TrafficSplit
+metadata:
+  name: {{ .Values.serviceName }}-split
+  namespace: default
+spec:
+  service: {{ .Values.serviceName }}
+  backends:
+  - service: {{ .Values.serviceName }}-stable
+    weight: 100
+  - service: {{ .Values.serviceName }}-canary
+    weight: 0
