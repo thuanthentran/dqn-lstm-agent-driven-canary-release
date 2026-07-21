@@ -3,7 +3,6 @@ kind: Rollout
 metadata:
   # Tên Rollout sẽ tự động lấy theo tên service (vd: paymentservice)
   name: {{ .Values.serviceName }}
-  namespace: default
 spec:
   # Tự động lấy số lượng replicas gán tĩnh từ file values (Ví dụ: 5 pods)
   replicas: {{ .Values.replicas | default 1 }}
