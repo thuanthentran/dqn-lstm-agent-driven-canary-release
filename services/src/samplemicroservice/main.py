@@ -7,7 +7,7 @@ import grpc
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
-
+#trigger build
 # Import file sinh ra từ protobuf
 import hollow_pb2
 import hollow_pb2_grpc
@@ -111,3 +111,4 @@ async def handle_http_request():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
