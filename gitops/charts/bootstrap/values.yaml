@@ -20,6 +20,3 @@ services:
   - name: service-c
     chartPath: gitops/charts/universal-canary
     valueFile: ../../releases/service-c-values.yaml
-    
-  - name: base-resources
-    chartPath: gitops/base
