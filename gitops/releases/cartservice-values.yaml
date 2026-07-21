@@ -1,7 +1,0 @@
-serviceName: cartservice
-replicas: 1
-image: ghcr.io/thuanthentran/cartservice:latest
-containerPort: 7070
-env:
-  - name: REDIS_ADDR
-    value: "redis-cart:6379"

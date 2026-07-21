@@ -1,9 +1,0 @@
-serviceName: currencyservice
-replicas: 1
-image: ghcr.io/thuanthentran/currencyservice:latest
-containerPort: 7000
-env:
-  - name: PORT
-    value: "7000"
-  - name: DISABLE_PROFILER
-    value: "1"

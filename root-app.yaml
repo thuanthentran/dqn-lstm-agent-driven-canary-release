@@ -25,7 +25,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: bootstrap-app
+  name: bootstrap-prod
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -35,6 +35,35 @@ spec:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
     targetRevision: grafanabeyla
     path: gitops/charts/bootstrap
+    helm:
+      parameters:
+        - name: global.destinationNamespace
+          value: prod
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: false
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bootstrap-twin
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
+    targetRevision: grafanabeyla
+    path: gitops/charts/bootstrap
+    helm:
+      parameters:
+        - name: global.destinationNamespace
+          value: twin
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: default

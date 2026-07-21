@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package hollow;
+
+service HollowService {
+  // Hàm gọi chung cho mọi microservice
+  rpc ProcessRPC (ProcessRequest) returns (ProcessResponse) {}
+}
+
+message ProcessRequest {
+  string caller_name = 1;
+}
+
+message ProcessResponse {
+  string service_name = 1;
+  string status = 2;
+  string message = 3;
+}

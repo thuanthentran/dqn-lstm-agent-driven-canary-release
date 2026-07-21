@@ -1,10 +1,10 @@
-serviceName: frontend
+serviceName: service-c
 replicas: 1
 image: ghcr.io/thuanthentran/samplemicroservice:latest
 containerPort: 8000
 portName: http
 env:
   - name: SERVICE_NAME
-    value: frontend
+    value: service-c
   - name: UPSTREAMS
-    value: http://service-a:8000,http://service-b:8000
+    value: ""
