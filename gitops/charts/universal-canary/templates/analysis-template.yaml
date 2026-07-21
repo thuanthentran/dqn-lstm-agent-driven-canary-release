@@ -24,10 +24,10 @@ spec:
         method: POST
         # Gói tên service và mã hash thành JSON gửi cho Agent
         jsonBody:
-          service: "{{args.service-name}}"
-          stable_hash: "{{args.stable-hash}}"
-          canary_hash: "{{args.canary-hash}}"
-          target_weight: "{{args.target-weight}}"
+          service: {{ `"{{args.service-name}}"` }}
+          stable_hash: {{ `"{{args.stable-hash}}"` }}
+          canary_hash: {{ `"{{args.canary-hash}}"` }}
+          target_weight: {{ `"{{args.target-weight}}"` }}
     # Thành công khi API trả về biến action = 1 (Promote)
     successCondition: result.action == 1 
     # Thất bại (Rollback) khi API trả về action = 2 (Abort)
