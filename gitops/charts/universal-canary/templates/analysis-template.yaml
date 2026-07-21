@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
-  name: universal-rl-agent-eval
+  name: {{ .Values.serviceName }}-eval
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
 spec:

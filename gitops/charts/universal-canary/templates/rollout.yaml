@@ -51,7 +51,7 @@ spec:
       - setWeight: 20
       - analysis:
           templates:
-          - templateName: universal-rl-agent-eval
+          - templateName: {{ .Values.serviceName }}-eval
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -66,7 +66,7 @@ spec:
       - setWeight: 50
       - analysis:
           templates:
-          - templateName: universal-rl-agent-eval
+          - templateName: {{ .Values.serviceName }}-eval
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -81,7 +81,7 @@ spec:
       - setWeight: 80
       - analysis:
           templates:
-          - templateName: universal-rl-agent-eval
+          - templateName: {{ .Values.serviceName }}-eval
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
