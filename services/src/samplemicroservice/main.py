@@ -1,0 +1,113 @@
+import os
+import time
+import random
+import asyncio
+import httpx
+import grpc
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import uvicorn
+
+# Import file sinh ra từ protobuf
+import hollow_pb2
+import hollow_pb2_grpc
+
+app = FastAPI()
+
+SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-service")
+UPSTREAMS = os.getenv("UPSTREAMS", "").split(",")
+
+# Trạng thái Chaos
+chaos_config = {"delay_ms": 0.0, "error_rate": 0.0, "cpu_burn_iters": 0}
+
+class ChaosSettings(BaseModel):
+    delay_ms: float = 0.0
+    error_rate: float = 0.0
+    cpu_burn_iters: int = 0
+
+@app.post("/chaos")
+def set_chaos(settings: ChaosSettings):
+    chaos_config.update(settings.dict())
+    return {"status": "chaos_updated", "config": chaos_config}
+
+async def apply_chaos_async():
+    """Hàm vật lý mô phỏng lỗi dùng chung cho cả HTTP và gRPC"""
+    if chaos_config["error_rate"] > 0 and random.random() < chaos_config["error_rate"]:
+        raise Exception(f"Chaos Injected in {SERVICE_NAME}")
+    
+    if chaos_config["cpu_burn_iters"] > 0:
+        # Ngốn CPU (Block event loop một chút để tạo nghẽn)
+        for _ in range(chaos_config["cpu_burn_iters"]):
+            pass
+
+    if chaos_config["delay_ms"] > 0:
+        await asyncio.sleep(chaos_config["delay_ms"] / 1000.0)
+
+# ==========================================
+# 1. gRPC SERVER CONTROLLER
+# ==========================================
+class HollowServicer(hollow_pb2_grpc.HollowServiceServicer):
+    async def ProcessRPC(self, request, context):
+        try:
+            await apply_chaos_async()
+            # gRPC cũng có thể gọi tiếp upstream nếu nó nằm ở giữa chuỗi
+            await call_upstreams() 
+            return hollow_pb2.ProcessResponse(
+                service_name=SERVICE_NAME, 
+                status="ok", 
+                message="gRPC Success"
+            )
+        except Exception as e:
+            context.set_code(grpc.StatusCode.UNAVAILABLE)
+            context.set_details(str(e))
+            return hollow_pb2.ProcessResponse()
+
+async def serve_grpc():
+    server = grpc.aio.server()
+    hollow_pb2_grpc.add_HollowServiceServicer_to_server(HollowServicer(), server)
+    server.add_insecure_port('[::]:50051')
+    await server.start()
+    await server.wait_for_termination()
+
+# Kích hoạt gRPC Server chạy ngầm cùng FastAPI
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(serve_grpc())
+
+# ==========================================
+# 2. HTTP SERVER & UPSTREAM CALLER
+# ==========================================
+async def call_upstreams():
+    """Hàm tự động định tuyến gọi HTTP hoặc gRPC"""
+    if not UPSTREAMS or UPSTREAMS[0] == "":
+        return {}
+
+    results = {}
+    async with httpx.AsyncClient() as http_client:
+        for url in UPSTREAMS:
+            try:
+                if url.startswith("http://"):
+                    resp = await http_client.get(url)
+                    results[url] = resp.json()
+                elif url.startswith("grpc://"):
+                    target = url.replace("grpc://", "")
+                    # Gọi gRPC bằng Async Channel
+                    async with grpc.aio.insecure_channel(target) as channel:
+                        stub = hollow_pb2_grpc.HollowServiceStub(channel)
+                        resp = await stub.ProcessRPC(hollow_pb2.ProcessRequest(caller_name=SERVICE_NAME))
+                        results[url] = {"status": resp.status, "service": resp.service_name}
+            except Exception as e:
+                results[url] = f"Failed: {str(e)}"
+    return results
+
+@app.get("/")
+async def handle_http_request():
+    try:
+        await apply_chaos_async()
+        upstream_results = await call_upstreams()
+        return {"service": SERVICE_NAME, "status": "ok", "upstreams": upstream_results}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

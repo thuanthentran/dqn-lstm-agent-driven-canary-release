@@ -1,9 +1,0 @@
-serviceName: emailservice
-replicas: 1
-image: ghcr.io/thuanthentran/emailservice:latest
-containerPort: 5000
-env:
-  - name: PORT
-    value: "5000"
-  - name: DISABLE_PROFILER
-    value: "1"

@@ -5,48 +5,21 @@ global:
   destinationNamespace: default
 
 services:
-  - name: adservice
-    # SỬA Ở ĐÂY: Thêm tiền tố gitops/ vào tất cả chartPath
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/adservice-values.yaml
-    
-  - name: cartservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/cartservice-values.yaml
-    
-  - name: checkoutservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/checkoutservice-values.yaml
-    
-  - name: currencyservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/currencyservice-values.yaml
-    
-  - name: emailservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/emailservice-values.yaml
-    
   - name: frontend
     chartPath: gitops/charts/universal-canary
     valueFile: ../../releases/frontend-values.yaml
     
-  - name: paymentservice
+  - name: service-a
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/paymentservice-values.yaml
+    valueFile: ../../releases/service-a-values.yaml
     
-  - name: productcatalogservice
+  - name: service-b
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/productcatalogservice-values.yaml
+    valueFile: ../../releases/service-b-values.yaml
     
-  - name: recommendationservice
+  - name: service-c
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/recommendationservice-values.yaml
-    
-  - name: shippingservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/shippingservice-values.yaml
+    valueFile: ../../releases/service-c-values.yaml
     
   - name: base-resources
     chartPath: gitops/base
-  - name: redis-cart
-    chartPath: gitops/base/redis-cart

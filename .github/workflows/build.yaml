@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "grafanabeyla" ]
     paths:
-      - 'services/**'
+      - 'services/src/samplemicroservice/**'
   workflow_dispatch:
 
 permissions:
@@ -12,40 +12,8 @@ permissions:
   packages: write 
 
 jobs:
-  # Job 1: Tự động phát hiện service nào có thay đổi code
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      services: ${{ steps.filter.outputs.changes }}
-    steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
-        id: filter
-        with:
-          filters: |
-            # Định nghĩa các service tại đây
-            adservice: 'services/src/adservice/**'
-            cartservice: 'services/src/cartservice/src/**'
-            checkoutservice: 'services/src/checkoutservice/**'
-            currencyservice: 'services/src/currencyservice/**'
-            emailservice: 'services/src/emailservice/**'
-            frontend: 'services/src/frontend/**'
-            paymentservice: 'services/src/paymentservice/**'
-            productcatalogservice: 'services/src/productcatalogservice/**'
-            recommendationservice: 'services/src/recommendationservice/**'
-            shippingservice: 'services/src/shippingservice/**'
-            agent: 'services/agent/**'
-            controller: 'services/controller/**'
-  # Job 2: Build và Push song song các service đã thay đổi
   build:
-    needs: changes
-    if: ${{ needs.changes.outputs.services != '[]' }}
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # Nhận danh sách các service cần build từ Job 'changes'
-        service: ${{ fromJson(needs.changes.outputs.services) }}
-    
     steps:
       - uses: actions/checkout@v3
 
@@ -59,25 +27,13 @@ jobs:
       - name: Prepare Image Name
         id: prep
         run: |
-          # Ép tên image về chữ thường (bắt buộc của GHCR)
-          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/samplemicroservice
           echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
-          context: >-
-            ${{ 
-              matrix.service == 'cartservice' && './services/src/cartservice/src' ||
-              matrix.service == 'agent' && '.' ||
-              matrix.service == 'controller' && './services/controller' ||
-              format('./services/src/{0}', matrix.service)
-            }}
-          file: >-
-            ${{
-              matrix.service == 'cartservice' && './services/src/cartservice/src/Dockerfile' ||
-              matrix.service == 'agent' && './services/agent/Dockerfile' ||
-              matrix.service == 'controller' && './services/controller/Dockerfile' ||
-              format('./services/src/{0}/Dockerfile', matrix.service)
-            }}
+          context: ./services/src/samplemicroservice
+          file: ./services/src/samplemicroservice/Dockerfile
           push: true
           tags: ${{ steps.prep.outputs.image_name }}:latest
