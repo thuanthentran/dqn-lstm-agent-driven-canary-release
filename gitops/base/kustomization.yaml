@@ -11,3 +11,7 @@ resources:
   - argo-rollouts/argo-rollouts-config.yaml
   - argo-rollouts/argo-rollouts-rbac.yaml
   - argo-rollouts/universal-analysis-template.yaml
+  - linkerd/linkerd-crds.yaml
+  - linkerd/linkerd-control-plane.yaml
+  - linkerd/linkerd-viz.yaml
+  - linkerd/linkerd-smi.yaml
