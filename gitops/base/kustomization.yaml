@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - crds/crd-servicemonitors.yaml
+  - crds/trafficsplit-crd.yaml
   - agent/agent-crd.yaml
   - agent/agent-operator.yaml
   - agent/agent-instance.yaml
