@@ -12,7 +12,8 @@ serviceType: ClusterIP
 # nodePort is only used if serviceType is NodePort
 # nodePort: 30080
 
-podAnnotations: {}
+podAnnotations:
+  linkerd.io/inject: enabled
 
 readinessProbe: {}
 #  httpGet:
