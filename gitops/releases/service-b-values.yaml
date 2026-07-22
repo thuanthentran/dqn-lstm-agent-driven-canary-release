@@ -8,6 +8,8 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
+  - name: VERSION
+    value: "test-twin-to-prod"
 
 extraVolumes:
   - name: config-volume
