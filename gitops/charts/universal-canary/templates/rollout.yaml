@@ -61,12 +61,52 @@ spec:
       # PROD NAMESPACE STEPS
       # ===============================================
       - setWeight: 1
-      - pause: {} # Chờ đồng bộ từ Twin (qua Sync Controller)
+      - pause: {} # Duyệt thủ công ở 1%
       - setWeight: 20
-      - pause: {duration: 60s} # Prod tự do đánh giá tiếp nhưng an toàn hơn vì Twin đã pass
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "20"
       - setWeight: 50
-      - pause: {duration: 60s}
-      - setWeight: 100
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "50"
+      - setWeight: 80
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "80"
       {{- else if eq .Values.envNamespace "twin" }}
       # ===============================================
       # TWIN NAMESPACE STEPS
