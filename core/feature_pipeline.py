@@ -16,8 +16,10 @@ RAW_KEYS = [
     "e_stable",
     "l_canary",
     "l_stable",
-    "cpu",
-    "mem_mb",
+    "cpu_canary",
+    "cpu_stable",
+    "mem_canary_mb",
+    "mem_stable_mb",
     "rps",
 ]
 
@@ -48,15 +50,23 @@ def normalize_raw_metrics(raw: Dict[str, float]) -> Dict[str, float]:
     e_gap = max(0.0, e_canary - e_stable)
     l_gap_ratio = max(0.0, (l_canary - l_stable) / max(l_stable, EPSILON))
 
+    cpu_canary = max(0.0, float(raw.get("cpu_canary", 0.0)))
+    cpu_stable = max(0.0, float(raw.get("cpu_stable", 0.0)))
+    mem_canary = max(0.0, float(raw.get("mem_canary_mb", 0.0)))
+    mem_stable = max(0.0, float(raw.get("mem_stable_mb", 0.0)))
+
+    cpu_ratio = cpu_canary / max(cpu_stable, EPSILON)
+    mem_ratio = mem_canary / max(mem_stable, EPSILON)
+
     state = {
-        "weight_n": _clip(float(raw["weight_pct"]) / 100.0, 0.0, 1.0),
+        "weight_n": _clip(float(raw.get("weight_pct", 0.0)) / 100.0, 0.0, 1.0),
         "e_ratio_n": _clip(e_ratio / MAX_RATIO, 0.0, 1.0),
         "l_ratio_n": _clip(l_ratio / MAX_RATIO, 0.0, 1.0),
         "e_gap_n": _clip(e_gap / MAX_ERR, 0.0, 1.0),
         "l_gap_n": _clip(l_gap_ratio / MAX_RATIO, 0.0, 1.0),
-        "cpu_n": _clip(float(raw["cpu"]) / CPU_REF, 0.0, 1.0),
-        "mem_n": _clip(float(raw["mem_mb"]) / MEM_REF_MB, 0.0, 1.0),
-        "rps_n": _clip(float(raw["rps"]) / RPS_REF, 0.0, 1.0),
+        "cpu_n": _clip(cpu_ratio / MAX_RATIO, 0.0, 1.0),
+        "mem_n": _clip(mem_ratio / MAX_RATIO, 0.0, 1.0),
+        "rps_n": _clip(float(raw.get("rps", 0.0)) / RPS_REF, 0.0, 1.0),
     }
 
     return state
