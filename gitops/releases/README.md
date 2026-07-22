@@ -1,95 +1,44 @@
-# Hướng Dẫn Kích Hoạt & Mô Phỏng Lỗi Canary Release (GitOps)
+# GitOps & Chaos Testing
 
-Thư mục này chứa các file cấu hình `values.yaml` phát hành cho 4 microservices:
-- `frontend-values.yaml`
-- `service-a-values.yaml`
-- `service-b-values.yaml`
-- `service-c-values.yaml`
+Thư mục này chứa cấu hình Values (`*-values.yaml`) cho các đợt phát hành Microservices qua ArgoCD, cũng như ConfigMap mô phỏng kịch bản lỗi (Chaos Engineering).
 
----
+## 1. Giới thiệu Kiến trúc Chaos Testing
+Hiện tại, `samplemicroservice` đã được nâng cấp để hỗ trợ "bơm lỗi" trực tiếp vào ứng dụng nhằm kiểm thử khả năng phản ứng của AI Agent (RL Model PPO-LSTM) mà không cần phải viết thêm mã nguồn phức tạp hay build lại Docker Image. 
 
-## 1. Cách Trigger Đợt Canary Release Mới
+Cụ thể, mã nguồn logic bơm lỗi (`main.py`) được quản lý bằng tệp `service-b-configmap.yaml` và tự động ghi đè vào pod đang chạy bằng tính năng `extraVolumes` của Base Chart `universal-canary`.
 
-Để khởi động một phiên bản release mới cho bất kỳ microservice nào, bạn chỉ cần chỉnh sửa file `values.yaml` tương ứng của dịch vụ đó, sau đó commit và push lên Git.
+### Các biến môi trường hỗ trợ Chaos:
+- `CHAOS_ERROR_RATE`: Tỷ lệ request trả về lỗi 503 (ví dụ: `0.1` = 10%).
+- `CHAOS_DELAY_MS`: Mô phỏng độ trễ Latency. Request sẽ bị block thêm số ms này (ví dụ: `2000` = 2s).
+- `CHAOS_CPU_BURN_ITERS`: Mô phỏng High CPU. Ứng dụng chạy vòng lặp vô ích để ngốn CPU (ví dụ: `5000000`).
+- `CHAOS_MEM_ALLOC_MB`: Mô phỏng High Memory/OOM. Ứng dụng tự động cấp phát số MB RAM này vào bộ nhớ (ví dụ: `256` = 256MB).
 
----
+## 2. Cách Trigger Rollout Bản Lỗi Tạm Thời (Manual Patching)
 
-## 2. Kịch Bản 1: Triển Khai Phiên Bản Thành Công (PASS / PROMOTE)
+Để kiểm thử Agent mà không làm bẩn mã nguồn (Git), bạn có thể tiến hành "Patch" cấu hình tạm thời trực tiếp trên cụm K8s. Argo Rollouts sẽ nhận diện có thay đổi (tạo ReplicaSet mới) và trigger tiến trình phân tích `AnalysisRun`.
 
-Khi muốn phát hành phiên bản hoạt động bình thường, không bơm lỗi:
-
-Sửa file (ví dụ `service-b-values.yaml`):
-
-```yaml
-serviceName: service-b
-replicas: 1
-image: ghcr.io/thuanthentran/samplemicroservice:latest
-containerPort: 8000
-portName: http
-env:
-  - name: SERVICE_NAME
-    value: service-b
-  - name: UPSTREAMS
-    value: ""
-  - name: CHAOS_ERROR_RATE
-    value: "0.0"   # Không có lỗi
-  - name: CHAOS_DELAY_MS
-    value: "0"     # Không có độ trễ
-```
-
-**Luồng hoạt động:**
-1. `twin` namespace chạy Canary Release (20% -> 50% -> 80%) + Stress Test tự động.
-2. RL Agent đánh giá chỉ số Prometheus tốt -> Trả về `Promote`.
-3. `twin` hoàn tất thành công (`Healthy`).
-4. `sync-controller` CronJob phát hiện `twin` thành công -> Tự động Unpause cho `prod` tiến hành release trên Production!
-
----
-
-## 3. Kịch Bản 2: Triển Khai Phiên Bản Lỗi / Giả Lập Chaos (FAIL / ABORT)
-
-Để thử nghiệm khả năng tự động Rollback và bảo vệ môi trường Production khi phiên bản mới bị lỗi:
-
-Sửa các biến `CHAOS_*` trong file (ví dụ `service-b-values.yaml`):
-
-```yaml
-serviceName: service-b
-replicas: 1
-image: ghcr.io/thuanthentran/samplemicroservice:latest
-containerPort: 8000
-portName: http
-env:
-  - name: SERVICE_NAME
-    value: service-b
-  - name: UPSTREAMS
-    value: ""
-  # === BƠM LỖI GIẢ LẬP ===
-  - name: CHAOS_ERROR_RATE
-    value: "0.5"   # Mô phỏng tỷ lệ lỗi 50%
-  - name: CHAOS_DELAY_MS
-    value: "2000"  # Mô phỏng trễ 2000ms (2 giây)
-```
-
-**Các biến Chaos khả dụng:**
-- `CHAOS_ERROR_RATE`: Tỷ lệ ném lỗi HTTP 503 / gRPC UNAVAILABLE (từ `0.0` đến `1.0`).
-- `CHAOS_DELAY_MS`: Thêm độ trễ tính theo mili-giây.
-- `CHAOS_CPU_BURN_ITERS`: Vòng lặp chiếm dụng CPU để thử nghiệm nghẽn tính toán.
-
-**Luồng hoạt động:**
-1. `twin` namespace khởi tạo Canary Pod mới mang biến môi trường bị bơm lỗi.
-2. Stress Test Job nã tải vào `frontend`, lưu lượng đi qua `service-b-canary` bị ném lỗi 50%.
-3. Linkerd ghi nhận chỉ số lỗi/latency tăng vọt vào Prometheus.
-4. RL Agent đánh giá thấy chất lượng kém -> Trả về `Abort`.
-5. Rollout ở `twin` tự động Rollback (chuyển trạng thái `Degraded`).
-6. `sync-controller` phát hiện `twin` bị `Degraded` -> Tự động chạy `kubectl argo rollouts abort` trên `prod`, giúp bảo vệ môi trường thật khỏi bị lỗi!
-
----
-
-## 4. Lệnh Commit & Push Kích Hoạt
-
-Sau khi chỉnh sửa file values mong muốn, chạy các lệnh sau trên Terminal:
-
+**Bước 1: Trigger Lỗi bằng Kubectl Patch**
 ```bash
-git add gitops/releases/
-git commit -m "feat(release): trigger canary rollout with chaos testing"
-git push origin linkerd
+wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_ERROR_RATE"}, 
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "1.0"}
+]'
 ```
+*(Bạn có thể thay đổi `CHAOS_ERROR_RATE` bằng `CHAOS_DELAY_MS` hay bất kỳ biến nào phía trên).*
+
+**Bước 2: Quan sát RL Agent phân tích**
+- Load-tester `hey` sẽ đẩy tải vào bản Rollout mới.
+- Linkerd & Prometheus thu thập thông tin và đẩy cho Agent.
+- Theo dõi `AnalysisRun` để xem Agent đưa ra phán quyết (Promote, Wait, hay Rollback):
+```bash
+wsl -d k3s kubectl get analysisrun -n twin -w
+```
+
+## 3. Cách Phục hồi (Quay trở lại bản Healthy)
+
+Do chúng ta thực hiện thao tác Patch thủ công (tạm thời) vượt quyền Git, trạng thái của cluster lúc này đã bị OutOfSync so với cấu hình trên Git.
+
+**Để phục hồi:**
+- Mở **ArgoCD UI**.
+- Tìm ứng dụng `service-b-twin` hoặc `service-b-prod`.
+- Nhấn nút **SYNC** để ArgoCD đồng bộ lại trạng thái của Rollout về đúng như những gì được thiết kế (không có các biến Chaos nguy hiểm). Bản phát hành lỗi (nếu đang chạy dở) sẽ bị ngừng, và trở lại trạng thái khoẻ mạnh ban đầu.
