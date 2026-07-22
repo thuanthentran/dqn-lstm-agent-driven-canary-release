@@ -9,3 +9,12 @@ env:
   - name: UPSTREAMS
     value: ""
 
+extraVolumes:
+  - name: config-volume
+    configMap:
+      name: service-b-configmap
+
+extraVolumeMounts:
+  - name: config-volume
+    mountPath: /app/main.py
+    subPath: main.py

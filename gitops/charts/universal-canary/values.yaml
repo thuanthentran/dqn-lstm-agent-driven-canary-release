@@ -24,3 +24,6 @@ readinessProbe: {}
 env: []
 #  - name: EXAMPLE_ENV
 #    value: "example"
+
+extraVolumes: []
+extraVolumeMounts: []

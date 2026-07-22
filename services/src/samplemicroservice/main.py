@@ -14,6 +14,8 @@ import hollow_pb2_grpc
 
 app = FastAPI()
 
+_mem_hogs = []
+
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-service")
 UPSTREAMS = os.getenv("UPSTREAMS", "").split(",")
 
@@ -22,12 +24,14 @@ chaos_config = {
     "delay_ms": float(os.getenv("CHAOS_DELAY_MS", "0.0")),
     "error_rate": float(os.getenv("CHAOS_ERROR_RATE", "0.0")),
     "cpu_burn_iters": int(os.getenv("CHAOS_CPU_BURN_ITERS", "0")),
+    "mem_alloc_mb": int(os.getenv("CHAOS_MEM_ALLOC_MB", "0")),
 }
 
 class ChaosSettings(BaseModel):
     delay_ms: float = 0.0
     error_rate: float = 0.0
     cpu_burn_iters: int = 0
+    mem_alloc_mb: int = 0
 
 @app.post("/chaos")
 def set_chaos(settings: ChaosSettings):
@@ -43,6 +47,15 @@ async def apply_chaos_async():
         # Ngốn CPU (Block event loop một chút để tạo nghẽn)
         for _ in range(chaos_config["cpu_burn_iters"]):
             pass
+
+    if chaos_config["mem_alloc_mb"] > 0:
+        # Allocate 1MB chunks to consume memory globally
+        mb_to_alloc = chaos_config["mem_alloc_mb"]
+        if len(_mem_hogs) < mb_to_alloc:
+            try:
+                _mem_hogs.append(b"A" * (1024 * 1024))
+            except MemoryError:
+                pass
 
     if chaos_config["delay_ms"] > 0:
         await asyncio.sleep(chaos_config["delay_ms"] / 1000.0)
