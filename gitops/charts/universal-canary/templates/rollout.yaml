@@ -48,10 +48,27 @@ spec:
           trafficSplitName: {{ .Values.serviceName }}-split
             
       steps:
+      {{- if eq .Values.envNamespace "prod" }}
+      # ===============================================
+      # PROD NAMESPACE STEPS
+      # ===============================================
+      - setWeight: 1
+      - pause: {} # Chờ đồng bộ từ Twin (qua Sync Controller)
+      - setWeight: 20
+      - pause: {duration: 60s} # Prod tự do đánh giá tiếp nhưng an toàn hơn vì Twin đã pass
+      - setWeight: 50
+      - pause: {duration: 60s}
+      - setWeight: 100
+      {{- else if eq .Values.envNamespace "twin" }}
+      # ===============================================
+      # TWIN NAMESPACE STEPS
+      # ===============================================
       - setWeight: 20
       - analysis:
           templates:
           - templateName: {{ .Values.serviceName }}-eval
+          # Chạy song song Stress Test Job
+          - templateName: {{ .Values.serviceName }}-loadtest
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -93,3 +110,10 @@ spec:
               podTemplateHashValue: Latest
           - name: target-weight
             value: "80"
+      {{- else }}
+      # ===============================================
+      # DEFAULT STEPS
+      # ===============================================
+      - setWeight: 50
+      - pause: {duration: 30s}
+      {{- end }}

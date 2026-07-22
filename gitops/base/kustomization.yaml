@@ -11,3 +11,4 @@ resources:
   - argo-rollouts/argo-rollouts-install.yaml
   - argo-rollouts/argo-rollouts-config.yaml
   - argo-rollouts/argo-rollouts-rbac.yaml
+  - sync-controller/sync-controller.yaml

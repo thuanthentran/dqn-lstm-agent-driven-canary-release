@@ -1,0 +1,24 @@
+{{- if eq .Values.envNamespace "twin" }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Values.serviceName }}-loadtest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  metrics:
+  - name: stress-test
+    # Job provider in Argo Rollouts runs the Job and waits for completion
+    provider:
+      job:
+        spec:
+          backoffLimit: 0
+          template:
+            spec:
+              containers:
+              - name: load-tester
+                image: williamyeh/hey
+                # Run load test against the FRONTEND root service to test the entire North-South + East-West flow!
+                command: ["hey", "-z", "2m", "-c", "50", "http://frontend.{{ .Values.envNamespace }}.svc.cluster.local:8000/"]
+              restartPolicy: Never
+{{- end }}
