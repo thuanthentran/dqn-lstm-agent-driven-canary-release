@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: twin-prod-sync-controller
+  namespace: argo-rollouts
+spec:
+  schedule: "* * * * *" # Run every minute
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: argo-rollouts # Use rollouts admin SA
+          containers:
+          - name: syncer
+            image: quay.io/argoproj/kubectl-argo-rollouts:v1.6.0
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting Sync Controller..."
+              # Fetch all rollouts in prod
+              ROLLOUTS=$(kubectl get rollouts -n prod -o jsonpath='{.items[*].metadata.name}')
+              for ROLLOUT in $ROLLOUTS; do
+                echo "Checking Rollout: $ROLLOUT in prod namespace"
+                
+                # Check if prod rollout is paused
+                PROD_STATUS=$(kubectl get rollout $ROLLOUT -n prod -o jsonpath='{.status.phase}')
+                PROD_PAUSED=$(kubectl get rollout $ROLLOUT -n prod -o jsonpath='{.status.controllerPause}')
+                
+                if [[ "$PROD_STATUS" == "Paused" ]] || [[ "$PROD_PAUSED" == "true" ]]; then
+                  echo "Rollout $ROLLOUT in prod is PAUSED. Checking twin status..."
+                  
+                  # Check twin rollout status
+                  TWIN_STATUS=$(kubectl get rollout $ROLLOUT -n twin -o jsonpath='{.status.phase}')
+                  
+                  if [[ "$TWIN_STATUS" == "Healthy" ]]; then
+                    echo "Twin rollout $ROLLOUT is Healthy (Promoted). Promoting prod rollout..."
+                    kubectl argo rollouts promote $ROLLOUT -n prod
+                    echo "Promoted $ROLLOUT in prod successfully."
+                  elif [[ "$TWIN_STATUS" == "Degraded" ]]; then
+                    echo "Twin rollout $ROLLOUT failed (Degraded). Aborting prod rollout..."
+                    kubectl argo rollouts abort $ROLLOUT -n prod
+                  else
+                    echo "Twin rollout $ROLLOUT is still in progress (Phase: $TWIN_STATUS). Waiting..."
+                  fi
+                else
+                  echo "Rollout $ROLLOUT in prod is not paused (Phase: $PROD_STATUS)."
+                fi
+              done
+          restartPolicy: OnFailure

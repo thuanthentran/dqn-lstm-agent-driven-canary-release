@@ -14,11 +14,14 @@ spec:
     repoURL: {{ $.Values.global.repoURL | quote }}
     targetRevision: {{ $.Values.global.targetRevision | quote }}
     path: {{ .chartPath }}
-    {{- if .valueFile }}
     helm:
+      {{- if .valueFile }}
       valueFiles:
         - {{ .valueFile | quote }}
-    {{- end }}
+      {{- end }}
+      parameters:
+        - name: envNamespace
+          value: {{ $.Values.global.destinationNamespace | quote }}
   ignoreDifferences:
   - group: networking.istio.io
     kind: VirtualService
