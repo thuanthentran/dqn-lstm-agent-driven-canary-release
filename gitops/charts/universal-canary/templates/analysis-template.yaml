@@ -25,6 +25,7 @@ spec:
         # Gói tên service và mã hash thành JSON gửi cho Agent
         jsonBody:
           service: {{ `"{{args.service-name}}"` }}
+          namespace: {{ .Values.envNamespace | quote }}
           stable_hash: {{ `"{{args.stable-hash}}"` }}
           canary_hash: {{ `"{{args.canary-hash}}"` }}
           target_weight: {{ `"{{args.target-weight}}"` }}

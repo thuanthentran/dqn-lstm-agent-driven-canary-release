@@ -7,6 +7,7 @@ resources:
   - agent/agent-crd.yaml
   - agent/agent-operator.yaml
   - agent/agent-instance.yaml
+  - agent/linkerd-prom-policy.yaml
   - argo-rollouts/argo-rollouts-namespace.yaml
   - argo-rollouts/argo-rollouts-install.yaml
   - argo-rollouts/argo-rollouts-config.yaml
