@@ -114,21 +114,25 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
         # CPU/Mem vẫn phải lấy từ cAdvisor của K8s dựa vào pod hash
         _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\"{svc}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
     ]
 
     results = await asyncio.gather(*tasks)
-    (e_canary, e_stable, l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps) = results
+    (e_canary, e_stable, l_canary, l_stable, canary_rps, stable_rps, cpu_canary, mem_canary, cpu_stable, mem_stable, rps) = results
 
-    data_complete = all(series for series in (l_canary, l_stable, canary_rps, stable_rps, cpu, mem, rps))
+    data_complete = all(series for series in (l_canary, l_stable, canary_rps, stable_rps, cpu_canary, mem_canary, cpu_stable, mem_stable, rps))
     latest_canary_rps = float(canary_rps[-1]) if canary_rps else 0.0
 
     e_canary = _normalize_series(e_canary, SEQ_LENGTH)
     e_stable = _normalize_series(e_stable, SEQ_LENGTH)
     l_canary = _normalize_series(l_canary, SEQ_LENGTH)
     l_stable = _normalize_series(l_stable, SEQ_LENGTH)
-    cpu = _normalize_series(cpu, SEQ_LENGTH)
-    mem = _normalize_series(mem, SEQ_LENGTH)
+    cpu_canary = _normalize_series(cpu_canary, SEQ_LENGTH)
+    mem_canary = _normalize_series(mem_canary, SEQ_LENGTH)
+    cpu_stable = _normalize_series(cpu_stable, SEQ_LENGTH)
+    mem_stable = _normalize_series(mem_stable, SEQ_LENGTH)
     rps = _normalize_series(rps, SEQ_LENGTH)
 
     # Đưa weight về thang 0.0 -> 1.0
@@ -142,7 +146,10 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
         safe_e_stable = max(e_stable[i], 0.001)
         raw = {
             "weight_pct": observed_weight * 100.0, "e_canary": safe_e_canary, "e_stable": safe_e_stable,
-            "l_canary": l_canary[i], "l_stable": l_stable[i], "cpu": cpu[i], "mem_mb": mem[i], "rps": rps[i],
+            "l_canary": l_canary[i], "l_stable": l_stable[i], 
+            "cpu_canary": cpu_canary[i], "cpu_stable": cpu_stable[i], 
+            "mem_canary_mb": mem_canary[i], "mem_stable_mb": mem_stable[i], 
+            "rps": rps[i],
         }
         norm = normalize_raw_metrics(raw)
         
