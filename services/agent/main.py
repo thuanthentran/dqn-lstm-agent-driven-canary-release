@@ -196,43 +196,87 @@ async def get_decision(payload: WebhookPayload):
     try:
         data, data_complete, observed_weight, latest_raw, latest_state, latest_canary_rps = await _build_history_from_prometheus(payload)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to build history: {exc}")
 
     # Nếu dữ liệu chưa thu thập đủ (Prometheus chưa kịp scrape), trả về trạng thái chờ
     if not data_complete:
-        return {"action": 0, "decision": "Running"}  # 0 = Hold/Running
+        return {"action": 0, "decision": "Running"}
 
     # Chốt chặn Data: Nếu đã có dữ liệu đầy đủ nhưng RPS canary = 0, Rollback ngay
     if observed_weight > 0 and latest_canary_rps == 0.0:
-        return {"action": 2, "decision": "Rollback"} # 2 = Rollback
+        print("Guard triggered: RPS canary is 0")
+        return {"action": 0, "decision": "Stay (Waiting for traffic)"}
 
-    # Inference bằng RecurrentPPO (SB3)
-    input_tensor = np.array([data], dtype=np.float32)
-    action_val, _states = model.predict(input_tensor, deterministic=True)
-    action_val = int(action_val)
-    
-    # Đánh giá Guard
-    guard_decision, _ = _evaluate_safety_guard(latest_raw, observed_weight)
-    
-    if guard_decision == "Rollback":
-        action_val = 2
-    elif guard_decision == "Running" and action_val == 0:
-        action_val = 1 # Ép dừng lại (Stay) không cho Promote nếu hơi nguy hiểm
+    try:
+        ch_cpu, ch_mem, ch_lat, ch_err, ch_traffic = data
+        obs_channels = [
+            ch_cpu,
+            ch_mem,
+            ch_lat,
+            ch_err,
+            ch_traffic
+        ]
+        obs = np.array(obs_channels, dtype=np.float32)
+        obs = np.expand_dims(obs, axis=0)
+
+        # Áp dụng VecNormalize để chuẩn hóa dữ liệu theo phân phối lúc train
+        try:
+            from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+            import gymnasium as gym
+            
+            # Khởi tạo DummyEnv chỉ để load VecNormalize
+            class DummyEnv(gym.Env):
+                def __init__(self):
+                    super().__init__()
+                    self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(5, SEQ_LENGTH), dtype=np.float32)
+                    self.action_space = gym.spaces.Discrete(3)
+                def reset(self, seed=None, options=None):
+                    return np.zeros((5, SEQ_LENGTH), dtype=np.float32), {}
+                def step(self, action):
+                    return np.zeros((5, SEQ_LENGTH), dtype=np.float32), 0.0, False, False, {}
+                    
+            dummy_venv = DummyVecEnv([lambda: DummyEnv()])
+            vec_normalize = VecNormalize.load("models/vec_normalize.pkl", dummy_venv)
+            vec_normalize.training = False
+            obs = vec_normalize.normalize_obs(obs)
+        except Exception as e:
+            logger.error(f"Failed to normalize obs: {e}")
+
+        # Inference bằng RecurrentPPO (SB3)
+        action_val, _states = model.predict(obs, state=latest_state.get('lstm_states'))
+        action_val = int(action_val)
         
-    decision = "Stay"
-    api_action = 0
-    
-    if action_val == 2:
-        decision = "Rollback"
-        api_action = 2
-    elif action_val == 1:
-        decision = "Promote"
-        api_action = 1
-    elif action_val == 0:
+        # Đánh giá Guard
+        guard_decision, _ = _evaluate_safety_guard(latest_raw, observed_weight)
+        
+        if guard_decision == "Rollback":
+            action_val = 2
+        elif guard_decision == "Running" and action_val == 0:
+            action_val = 1 # Ép dừng lại (Stay) không cho Promote nếu hơi nguy hiểm
+            
         decision = "Stay"
         api_action = 0
+        
+        if action_val == 2:
+            decision = "Rollback"
+            api_action = 2
+        elif action_val == 1:
+            decision = "Promote"
+            api_action = 1
+        elif action_val == 0:
+            decision = "Stay"
+            api_action = 0
 
-    return {"action": api_action, "decision": decision}
+        logger.info(f"Decision Debug: action_val={action_val}, guard_decision={guard_decision}, api_action={api_action}, canary_rps={latest_canary_rps}")
+        logger.info(f"Raw metrics: {latest_raw}")
+        logger.info(f"State metrics: {latest_state}")
+        return {"action": api_action, "decision": decision}
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Inference failed: {exc}")
 
 @app.get("/health")
 def health():
