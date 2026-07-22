@@ -9,7 +9,7 @@ env:
   - name: UPSTREAMS
     value: ""
   - name: VERSION
-    value: "test-twin-to-prod"
+    value: "test-fully-automated-prod"
 
 extraVolumes:
   - name: config-volume
