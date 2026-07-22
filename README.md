@@ -127,11 +127,35 @@ Hệ thống cho phép bạn "bơm lỗi" trực tiếp vào Microservices để
 ### Cách tự Trigger kịch bản lỗi (Manual Patching)
 Thay vì sửa code trên Git (bẩn source code), bạn hãy Patch tạm thời lên Cụm K8s. RL Agent sẽ tự phân tích và đưa ra quyết định.
 
-**Ví dụ: Test High CPU**
+**Kịch bản 1: Test Lỗi (Error Rate - 100%)**
+```bash
+wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_ERROR_RATE"}, 
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "1.0"}
+]'
+```
+
+**Kịch bản 2: Test Độ Trễ (High Latency - 2000ms)**
+```bash
+wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_DELAY_MS"}, 
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "2000"}
+]'
+```
+
+**Kịch bản 3: Test Ngốn CPU (High CPU)**
 ```bash
 wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
   {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_CPU_BURN_ITERS"}, 
   {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "5000000"}
+]'
+```
+
+**Kịch bản 4: Test Ngốn RAM (High RAM / OOM - 256MB)**
+```bash
+wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_MEM_ALLOC_MB"}, 
+  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "256"}
 ]'
 ```
 
