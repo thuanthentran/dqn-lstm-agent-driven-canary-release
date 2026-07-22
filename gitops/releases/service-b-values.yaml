@@ -8,7 +8,4 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
-  - name: CHAOS_ERROR_RATE
-    value: "0.5"   # Mô phỏng tỷ lệ lỗi 50%
-  - name: CHAOS_DELAY_MS
-    value: "2000"  # Mô phỏng trễ 2000ms (2 giây)
+
