@@ -19,6 +19,7 @@ spec:
               - name: load-tester
                 image: williamyeh/hey
                 # Run load test against the FRONTEND root service to test the entire North-South + East-West flow!
-                command: ["hey", "-z", "2m", "-c", "50", "http://frontend.{{ .Values.envNamespace }}.svc.cluster.local:8000/"]
+                # Sử dụng /bin/sh -c với '|| true' để Job chỉ đóng vai trò tạo tải, không tự làm hỏng AnalysisRun
+                command: ["/bin/sh", "-c", "hey -z 2m -c 50 http://frontend.{{ .Values.envNamespace }}.svc.cluster.local:8000/ || true"]
               restartPolicy: Never
 {{- end }}
