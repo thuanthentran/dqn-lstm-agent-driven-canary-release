@@ -225,10 +225,10 @@ async def get_decision(payload: WebhookPayload):
     if action_val == 2:
         decision = "Rollback"
         api_action = 2
-    elif action_val == 0:
+    elif action_val == 1:
         decision = "Promote"
         api_action = 1
-    elif action_val == 1:
+    elif action_val == 0:
         decision = "Stay"
         api_action = 0
 
