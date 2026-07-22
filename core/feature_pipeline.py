@@ -45,10 +45,10 @@ def normalize_raw_metrics(raw: Dict[str, float]) -> Dict[str, float]:
     l_canary = max(0.0, float(raw["l_canary"]))
     l_stable = max(0.0, float(raw["l_stable"]))
 
-    e_ratio = e_canary / max(e_stable, EPSILON)
-    l_ratio = l_canary / max(l_stable, EPSILON)
+    e_ratio = e_canary / max(e_stable, 0.001)
+    l_ratio = l_canary / max(l_stable, 0.04)
     e_gap = max(0.0, e_canary - e_stable)
-    l_gap_ratio = max(0.0, (l_canary - l_stable) / max(l_stable, EPSILON))
+    l_gap_ratio = max(0.0, (l_canary - l_stable) / max(l_stable, 0.04))
 
     cpu_canary = max(0.0, float(raw.get("cpu_canary", 0.0)))
     cpu_stable = max(0.0, float(raw.get("cpu_stable", 0.0)))
