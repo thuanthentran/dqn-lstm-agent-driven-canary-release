@@ -17,8 +17,12 @@ app = FastAPI()
 SERVICE_NAME = os.getenv("SERVICE_NAME", "frontend-service")
 UPSTREAMS = os.getenv("UPSTREAMS", "").split(",")
 
-# Trạng thái Chaos
-chaos_config = {"delay_ms": 0.0, "error_rate": 0.0, "cpu_burn_iters": 0}
+# Trạng thái Chaos (Hỗ trợ đọc cấu hình khởi tạo từ biến môi trường)
+chaos_config = {
+    "delay_ms": float(os.getenv("CHAOS_DELAY_MS", "0.0")),
+    "error_rate": float(os.getenv("CHAOS_ERROR_RATE", "0.0")),
+    "cpu_burn_iters": int(os.getenv("CHAOS_CPU_BURN_ITERS", "0")),
+}
 
 class ChaosSettings(BaseModel):
     delay_ms: float = 0.0
