@@ -33,13 +33,14 @@ spec:
                   
                   # Check twin rollout status
                   TWIN_STATUS=$(kubectl get rollout $ROLLOUT -n twin -o jsonpath='{.status.phase}')
+                  TWIN_ABORTED=$(kubectl get rollout $ROLLOUT -n twin -o jsonpath='{.status.aborted}')
                   
-                  if [[ "$TWIN_STATUS" == "Healthy" ]]; then
+                  if [[ "$TWIN_STATUS" == "Healthy" ]] && [[ "$TWIN_ABORTED" != "true" ]]; then
                     echo "Twin rollout $ROLLOUT is Healthy (Promoted). Promoting prod rollout..."
                     kubectl argo rollouts promote $ROLLOUT -n prod
                     echo "Promoted $ROLLOUT in prod successfully."
-                  elif [[ "$TWIN_STATUS" == "Degraded" ]]; then
-                    echo "Twin rollout $ROLLOUT failed (Degraded). Aborting prod rollout..."
+                  elif [[ "$TWIN_STATUS" == "Degraded" ]] || [[ "$TWIN_ABORTED" == "true" ]]; then
+                    echo "Twin rollout $ROLLOUT failed (Degraded/Aborted). Aborting prod rollout..."
                     kubectl argo rollouts abort $ROLLOUT -n prod
                   else
                     echo "Twin rollout $ROLLOUT is still in progress (Phase: $TWIN_STATUS). Waiting..."
