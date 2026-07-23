@@ -1,8 +1,9 @@
 fastapi
-uvicorn
+uvicorn[standard]
 numpy
 pydantic
 httpx
 torch
-sb3-contrib
 stable-baselines3
+gymnasium
+websockets
