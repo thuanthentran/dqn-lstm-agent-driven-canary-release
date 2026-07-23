@@ -32,7 +32,7 @@ class OnlineCanaryEnv(gym.Env):
         self.service_list = service_list or ['checkoutservice']
         self.current_service = None
         self.action_space = spaces.Discrete(3)
-        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.num_features, self.seq_len), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(self.seq_len, self.num_features), dtype=np.float32)
         self.history = deque(maxlen=self.seq_len)
         self.current_step = 0
         self.max_steps = 20  
@@ -262,7 +262,7 @@ class OnlineCanaryEnv(gym.Env):
             norm["weight_n"]
         ], dtype=np.float32)
 
-    def _get_obs(self): return np.stack(list(self.history), axis=1).astype(np.float32)
+    def _get_obs(self): return np.stack(list(self.history), axis=0).astype(np.float32)
 
     def _print_dashboard(self, title, action_str, raw, norm):
         print(f"\n{C.CYAN}╭─────────────────────────────────────────────────────────────╮{C.END}")

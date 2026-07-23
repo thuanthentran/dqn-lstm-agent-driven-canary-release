@@ -32,7 +32,7 @@ class CanaryEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(self.num_features, self.seq_len),
+            shape=(self.seq_len, self.num_features),
             dtype=np.float32,
         )
         self.action_space = gym.spaces.Discrete(3)
@@ -130,7 +130,8 @@ class CanaryEnv(gym.Env):
         return np.array([cpu_c, mem_c, lat_c, err_c, traffic_c], dtype=np.float32)
 
     def _get_obs(self):
-        arr = np.stack(list(self.history), axis=1)
+        # Stack along axis=0: each row is a timestep with 5 features → (T, C)
+        arr = np.stack(list(self.history), axis=0)
         return arr.astype(np.float32)
 
     def _update_state(self):
