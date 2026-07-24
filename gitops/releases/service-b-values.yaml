@@ -8,8 +8,9 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
-  - name: VERSION
-    value: "test-fully-automated-prod"
+  - name: CHAOS_ERROR_RATE
+    value: "0.2"
+  
 
 extraVolumes:
   - name: config-volume
