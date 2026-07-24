@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   image: "ghcr.io/thuanthentran/agent:latest"
-  modelPath: "models/ppo_lstm_offline_best.zip"
+  modelPath: "models/ppo_transformer_offline_best.zip"
   prometheusUrl: "http://prometheus.linkerd-viz.svc.cluster.local:9090"
   replicas: 1
   port: 8000
