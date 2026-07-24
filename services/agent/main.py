@@ -12,6 +12,15 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from kubernetes import client, config
+
+try:
+    config.load_incluster_config()
+    k8s_api = client.CustomObjectsApi()
+    K8S_READY = True
+except Exception as e:
+    K8S_READY = False
+
 from core.feature_pipeline import normalize_raw_metrics
 from stable_baselines3 import PPO
 ##trigger build
@@ -327,6 +336,28 @@ async def get_decision(payload: WebhookPayload):
         raise HTTPException(status_code=500, detail=f"Inference failed: {exc}")
 
 
+class PromotePayload(BaseModel):
+    service: str
+
+@app.post("/api/v1/promote-prod")
+async def promote_prod(payload: PromotePayload):
+    if not K8S_READY:
+        raise HTTPException(status_code=500, detail="Kubernetes client not initialized")
+    try:
+        body = {"status": {"pauseConditions": None}}
+        k8s_api.patch_namespaced_custom_object_status(
+            group="argoproj.io",
+            version="v1alpha1",
+            namespace="prod",
+            plural="rollouts",
+            name=payload.service,
+            body=body
+        )
+        return {"status": "success", "message": f"Promoted {payload.service} in prod"}
+    except Exception as exc:
+        logger.exception("Failed to promote rollout in prod")
+        raise HTTPException(status_code=500, detail=str(exc))
+
 # --- 7. WEBSOCKET ENDPOINT ---
 @app.websocket("/ws/xai")
 async def xai_websocket(websocket: WebSocket):
@@ -430,6 +461,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+  .header-actions { display: flex; align-items: center; gap: 12px; }
+  .promote-btn { background: var(--accent-blue); color: white; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 12px var(--glow-blue); }
+  .promote-btn:hover { background: #2563eb; transform: translateY(-1px); }
+  .promote-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
   /* Grid layout */
   .grid { display: grid; gap: 20px; }
   .grid-2 { grid-template-columns: 1fr 1fr; }
@@ -515,9 +551,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <!-- Header -->
   <div class="header">
     <h1>🧠 <span>Canary AI</span> — Explainable Dashboard</h1>
-    <div id="wsStatus" class="status-badge disconnected">
-      <div class="status-dot"></div>
-      <span>Disconnected</span>
+    <div class="header-actions">
+      <button class="promote-btn" id="promoteBtn" onclick="promoteProd()" disabled>🚀 Promote to Prod</button>
+      <div id="wsStatus" class="status-badge disconnected">
+        <div class="status-dot"></div>
+        <span>Disconnected</span>
+      </div>
     </div>
   </div>
 
@@ -599,7 +638,38 @@ function connectWebSocket() {
   };
 }
 
+let currentService = "";
+
+async function promoteProd() {
+  if (!currentService) return;
+  const btn = document.getElementById("promoteBtn");
+  btn.disabled = true;
+  btn.innerText = "⏳ Promoting...";
+  try {
+    const res = await fetch("/api/v1/promote-prod", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: currentService })
+    });
+    if (res.ok) {
+      alert("✅ Successfully promoted in prod!");
+    } else {
+      const err = await res.text();
+      alert("❌ Failed to promote: " + err);
+    }
+  } catch(e) {
+    alert("❌ Error: " + e.message);
+  } finally {
+    btn.innerText = "🚀 Promote to Prod";
+    btn.disabled = false;
+  }
+}
+
 function updateDashboard(data) {
+  if (data.service) {
+    currentService = data.service;
+    document.getElementById("promoteBtn").disabled = false;
+  }
   updateFeatureImportance(data);
   updateFeatureHeatmap(data);
   updateTemporalHeatmap(data);
