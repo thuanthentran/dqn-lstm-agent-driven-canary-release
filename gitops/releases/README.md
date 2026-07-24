@@ -3,7 +3,7 @@
 Thư mục này chứa cấu hình Values (`*-values.yaml`) cho các đợt phát hành Microservices qua ArgoCD, cũng như ConfigMap mô phỏng kịch bản lỗi (Chaos Engineering).
 
 ## 1. Giới thiệu Kiến trúc Chaos Testing
-Hiện tại, `samplemicroservice` đã được nâng cấp để hỗ trợ "bơm lỗi" trực tiếp vào ứng dụng nhằm kiểm thử khả năng phản ứng của AI Agent (RL Model PPO-LSTM) mà không cần phải viết thêm mã nguồn phức tạp hay build lại Docker Image. 
+Hiện tại, `samplemicroservice` đã được nâng cấp để hỗ trợ "bơm lỗi" trực tiếp vào ứng dụng nhằm kiểm thử khả năng phản ứng của AI Agent (RL Model TransformerPPO) mà không cần phải viết thêm mã nguồn phức tạp hay build lại Docker Image. 
 
 Cụ thể, mã nguồn logic bơm lỗi (`main.py`) được quản lý bằng tệp `service-b-configmap.yaml` và tự động ghi đè vào pod đang chạy bằng tính năng `extraVolumes` của Base Chart `universal-canary`.
 
