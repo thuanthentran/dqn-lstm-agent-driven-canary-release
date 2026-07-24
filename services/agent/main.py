@@ -234,12 +234,12 @@ async def get_decision(payload: WebhookPayload):
 
     # Nếu dữ liệu chưa thu thập đủ (Prometheus chưa kịp scrape), trả về trạng thái chờ
     if not data_complete:
-        return {"action": 0, "decision": "Running"}
+        return {"action": 0, "decision": "Wait (Data)"}
 
     # Chốt chặn Data: Nếu đã có dữ liệu đầy đủ nhưng RPS canary = 0, trả về chờ
     if observed_weight > 0 and latest_canary_rps == 0.0:
         logger.info("Guard triggered: RPS canary is 0")
-        return {"action": 0, "decision": "Stay (Waiting for traffic)"}
+        return {"action": 0, "decision": "Wait (Traffic)"}
 
     try:
         ch_cpu, ch_mem, ch_lat, ch_err, ch_traffic = data
@@ -305,17 +305,17 @@ async def get_decision(payload: WebhookPayload):
         elif guard_decision == "Running" and action_val == 0:
             action_val = 1  # Ép dừng lại (Stay) không cho Promote nếu hơi nguy hiểm
 
-        decision = "Stay"
+        decision = "Wait"
         api_action = 0
 
         if action_val == 2:
-            decision = "Rollback"
+            decision = "Abort"
             api_action = 2
         elif action_val == 1:
-            decision = "Promote"
+            decision = "Pass"
             api_action = 1
         elif action_val == 0:
-            decision = "Stay"
+            decision = "Wait"
             api_action = 0
 
         # --- Broadcast XAI data qua WebSocket ---
@@ -799,7 +799,7 @@ function updateDecisionLog(data) {
   if (decisionCount === 0) log.innerHTML = '';
   decisionCount++;
 
-  const actionMap = {0: ['Stay', 'action-stay'], 1: ['Promote', 'action-promote'], 2: ['Rollback', 'action-rollback']};
+  const actionMap = {0: ['Wait', 'action-stay'], 1: ['Pass', 'action-promote'], 2: ['Abort', 'action-rollback']};
   const [label, cls] = actionMap[data.action] || ['Unknown', 'action-stay'];
   const ts = new Date(data.timestamp * 1000).toLocaleTimeString();
 
