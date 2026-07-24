@@ -1,6 +1,6 @@
 # K8s RL Canary Agent (Linkerd & SMI)
 
-Kho lưu trữ này chứa một môi trường Sandbox "Digital Twin" chuyên dụng, được thiết kế để huấn luyện và vận hành một Tác tử Học tăng cường (Reinforcement Learning - PPO+LSTM) làm nhiệm vụ quản lý quá trình phát hành Canary trên Kubernetes một cách tự động và an toàn.
+Kho lưu trữ này chứa một môi trường Sandbox "Digital Twin" chuyên dụng, được thiết kế để huấn luyện và vận hành một Tác tử Học tăng cường (Reinforcement Learning - TransformerPPO) làm nhiệm vụ quản lý quá trình phát hành Canary trên Kubernetes một cách tự động và an toàn.
 
 Kiến trúc này tận dụng **Cilium (CNI)** làm lớp mạng cơ sở, **Linkerd Service Mesh** để định tuyến luồng traffic L7 và thu thập metrics (thông qua linkerd-viz proxy), và **Argo Rollouts** kết hợp với **Linkerd-SMI** để quản lý vòng đời và điều hướng traffic cho bản Canary.
 
@@ -116,7 +116,7 @@ Chúng ta sử dụng Kube-Prometheus-Stack để scraping metrics từ Linkerd.
 
 ## 🌩️ GitOps & Chaos Testing (Thử nghiệm với RL Agent)
 
-Hệ thống cho phép bạn "bơm lỗi" trực tiếp vào Microservices để xem AI Agent (RL Model PPO-LSTM) phản ứng như thế nào (Promotion hay Abort) thông qua các biến môi trường cấu hình tại [service-b-configmap.yaml](gitops/releases/service-b-configmap.yaml) được tự động mount đè lên source code Python bằng tính năng `extraVolumes`.
+Hệ thống cho phép bạn "bơm lỗi" trực tiếp vào Microservices để xem AI Agent (RL Model TransformerPPO) phản ứng như thế nào (Promotion hay Abort) thông qua các biến môi trường cấu hình tại [service-b-configmap.yaml](gitops/releases/service-b-configmap.yaml) được tự động mount đè lên source code Python bằng tính năng `extraVolumes`.
 
 ### Các biến Chaos hỗ trợ:
 - `CHAOS_ERROR_RATE`: Mô phỏng tỷ lệ lỗi (Ví dụ: `0.1` = 10% HTTP 503).
@@ -180,3 +180,15 @@ python training/online_training.py
 - Script sẽ liên tục đưa môi trường về trạng thái Stable, sau đó tự động bơm ngẫu nhiên các kịch bản lỗi qua `FAULT_SCENARIO` trong Pod.
 - Agent cào metrics từ Prometheus, phân tích trạng thái (State) và xuất Action (Thao túng K8s).
 - Nó sẽ tự cập nhật hàm chính sách (Policy) dựa trên các phần thưởng/hình phạt (Rewards) do các quyết định đúng/sai mang lại.
+
+---
+
+## 📚 Cấu trúc Tài liệu Chi tiết
+Dự án được module hóa, và để đi sâu vào chi tiết của từng thành phần, mời bạn tham khảo các tài liệu nội bộ sau:
+- [GitOps Base (CRD & Agent Integration)](gitops/base/README.md): Cách tích hợp Tác tử học tăng cường dưới dạng CRD và Controller vào K8s.
+- [GitOps Bootstrap (Environments)](gitops/charts/bootstrap/README.md): Định nghĩa kiến trúc môi trường `twin` và `prod`.
+- [GitOps Universal Canary (Rollout Flow)](gitops/charts/universal-canary/README.md): Giải phẫu chi tiết luồng Canary, sự tương tác giữa Argo, Analysis và Agent.
+- [GitOps Releases (Chaos Testing)](gitops/releases/README.md): Cách tiêm lỗi (Chaos Engineering) thông qua cấu hình môi trường.
+- [Load Generator (Traffic Gen)](loadgenerator/README.md): Cấu trúc kiến trúc thành phần sinh tải ảo.
+- [Sample Microservice (Target Apps)](services/src/README.md): Kiến trúc ứng dụng mục tiêu được tiêm lỗi bằng FastAPI & gRPC.
+- [RL Agent Services (AI & UI)](services/agent/README.md): Kiến trúc của mô hình TransformerPPO và Dashboard theo dõi trực tiếp.
