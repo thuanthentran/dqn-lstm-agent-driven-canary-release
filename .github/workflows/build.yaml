@@ -5,6 +5,7 @@ on:
     branches: [ "linkerd" ]
     paths:
       - 'services/src/samplemicroservice/**'
+      - 'services/agent/**'
   workflow_dispatch:
 
 permissions:
