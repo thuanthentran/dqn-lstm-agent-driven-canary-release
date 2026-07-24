@@ -8,6 +8,7 @@ resources:
   - agent/agent-operator.yaml
   - agent/agent-instance.yaml
   - agent/agent-rbac.yaml
+  - agent/agent-nodeport-svc.yaml
   - agent/linkerd-prom-policy.yaml
   - argo-rollouts/argo-rollouts-namespace.yaml
   - argo-rollouts/argo-rollouts-install.yaml
