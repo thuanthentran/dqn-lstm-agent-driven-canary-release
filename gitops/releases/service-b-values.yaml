@@ -8,9 +8,8 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
-  - name: CHAOS_ERROR_RATE
-    value: "0.2"
-  
+  - name: CHAOS_DELAY_MS
+    value: "100"
 
 extraVolumes:
   - name: config-volume
