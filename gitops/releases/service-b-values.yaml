@@ -8,8 +8,6 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
-  - name: CHAOS_MEM_ALLOC_MB
-    value: "256"
 
 extraVolumes:
   - name: config-volume
