@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgenerator
+  namespace: prod
+  labels:
+    app: loadgenerator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgenerator
+  template:
+    metadata:
+      labels:
+        app: loadgenerator
+    spec:
+      containers:
+      - name: hey
+        image: williamyeh/hey
+        imagePullPolicy: Always
+        command:
+        - /hey
+        - -z
+        - 8760h
+        - -q
+        - "10"
+        - -c
+        - "2"
+        - http://frontend.prod.svc.cluster.local:8000/

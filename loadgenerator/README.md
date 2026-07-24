@@ -1,16 +1,18 @@
 # Load Generator (Traffic Gen)
 
-Thư mục này chứa mã nguồn của thành phần Load Generator - một máy tạo tải ảo được sử dụng để liên tục bắn traffic vào hệ thống, giúp kích hoạt luồng đo đạc metrics của Linkerd/Prometheus và làm đầu vào cho Agent phân tích.
+Thư mục này chứa manifest triển khai Load Generator - một máy tạo tải ảo được sử dụng để liên tục bắn traffic vào hệ thống, giúp kích hoạt luồng đo đạc metrics của Linkerd/Prometheus và làm đầu vào cho Agent phân tích.
 
 ## 1. Nó là gì?
-Load Generator là một ứng dụng Python sử dụng framework **Locust** (`FastHttpUser`). Nó mô phỏng hành vi của người dùng thật truy cập vào các endpoint của hệ thống.
+Hiện tại, Load Generator sử dụng công cụ **hey** (một chương trình HTTP load generator gọn nhẹ viết bằng Go) thông qua Docker image `williamyeh/hey`. Nó được triển khai dưới dạng một Kubernetes Deployment nằm trong namespace `prod`.
 
 ## 2. Kiến trúc và Mục tiêu
-- Tập lệnh mô phỏng (`locustfile.py`) định nghĩa các hành vi như: truy cập trang chủ (`/`), đổi tiền tệ (`/setCurrency`), xem sản phẩm (`/product/X`), thêm vào giỏ hàng (`/cart`), và thanh toán (`/cart/checkout`).
-- **Mục tiêu**: Load Generator không gọi trực tiếp vào IP của Pod mà gọi vào **Tên Service** của ứng dụng mục tiêu (được điều hướng bởi Linkerd).
-- Việc đa dạng hóa các endpoint giúp tạo ra tải trọng (CPU/RAM) và độ trễ ngẫu nhiên giống hệt môi trường thực tế, từ đó hệ thống Canary bộc lộ các điểm yếu (nếu có lỗi tiêm vào) một cách rõ nét nhất.
+- **Mục tiêu**: Load Generator bắn traffic liên tục vào endpoint của dịch vụ `frontend` (cụ thể là `http://frontend.prod.svc.cluster.local:8000/`).
+- Bằng cách tạo ra tải HTTP, nó mô phỏng người dùng thật đang truy cập vào hệ thống. Việc có traffic thực tế chảy qua sẽ giúp Linkerd ghi nhận được các metrics như độ trễ (latency), tỷ lệ lỗi (error rate) và cung cấp dữ liệu cho Agent khi đánh giá bản Canary.
 
 ## 3. Điều khiển Mật độ và Tốc độ
-Sức ép sinh tải của Load Generator phụ thuộc vào 2 yếu tố chính:
-- **Tham số `wait_time = between(1, 10)`**: Khai báo trong `locustfile.py`, khiến mỗi "người dùng" sẽ chờ ngẫu nhiên từ 1 đến 10 giây giữa các request. 
-- **Số lượng Concurrent Users (Replicas)**: Mật độ tải thực tế được điều khiển bằng số lượng bản sao (Replicas) hoặc tham số dòng lệnh truyền cho locust khi chạy trong K8s. Càng tăng số lượng người dùng đồng thời, số lượng Request/second (RPS) bắn vào Service mục tiêu càng lớn.
+Sức ép sinh tải của Load Generator được điều khiển qua các tham số dòng lệnh truyền cho `hey`:
+- `-z 8760h`: Thời gian chạy liên tục (ở đây là 1 năm, coi như chạy vô hạn).
+- `-c 2`: Số lượng worker/kết nối đồng thời (concurrent workers). Tăng con số này sẽ tạo ra nhiều traffic hơn.
+- `-q 10`: Giới hạn tốc độ (Rate limit) cho mỗi worker là 10 queries/second.
+
+Bạn có thể chỉnh sửa các tham số này trong file `loadgenerator.yaml` (nằm tại thư mục này) và apply lại (`kubectl apply -f loadgenerator.yaml`) để thay đổi cường độ giả lập người dùng.
