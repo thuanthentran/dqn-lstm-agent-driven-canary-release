@@ -8,9 +8,9 @@ env:
     value: service-b
   - name: UPSTREAMS
     value: ""
-  - name: CHAOS_CPU_BURN_ITERS
-    value: "5000000"
-    
+  - name: CHAOS_MEM_ALLOC_MB
+    value: "256"
+
 extraVolumes:
   - name: config-volume
     configMap:
