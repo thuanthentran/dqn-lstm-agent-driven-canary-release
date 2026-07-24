@@ -267,7 +267,7 @@ async def get_decision(payload: WebhookPayload):
 
         # Inference bằng TransformerPPO (SB3)
         action_val, _states = model.predict(obs)
-        action_val = int(action_val)
+        action_val = int(action_val.item() if hasattr(action_val, 'item') else action_val[0])
 
         # --- Trích xuất XAI Attention Maps ---
         xai_payload = None
