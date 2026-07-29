@@ -2,7 +2,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .name }}
+  name: {{ .name }}-{{ $.Values.global.destinationNamespace }}
   namespace: argocd # Các thực thể điều hướng của ArgoCD phải nằm trong namespace argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io # Tự động xóa sạch tài nguyên K8s khi App bị xóa
@@ -14,11 +14,14 @@ spec:
     repoURL: {{ $.Values.global.repoURL | quote }}
     targetRevision: {{ $.Values.global.targetRevision | quote }}
     path: {{ .chartPath }}
-    {{- if .valueFile }}
     helm:
+      {{- if .valueFile }}
       valueFiles:
         - {{ .valueFile | quote }}
-    {{- end }}
+      {{- end }}
+      parameters:
+        - name: envNamespace
+          value: {{ $.Values.global.destinationNamespace | quote }}
   ignoreDifferences:
   - group: networking.istio.io
     kind: VirtualService

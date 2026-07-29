@@ -1,6 +1,10 @@
 fastapi
-uvicorn
+uvicorn[standard]
 numpy
 pydantic
 httpx
 torch
+stable-baselines3
+gymnasium
+websockets
+kubernetes

@@ -32,7 +32,7 @@ class CanaryEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=0.0,
             high=1.0,
-            shape=(self.num_features, self.seq_len),
+            shape=(self.seq_len, self.num_features),
             dtype=np.float32,
         )
         self.action_space = gym.spaces.Discrete(3)
@@ -100,8 +100,12 @@ class CanaryEnv(gym.Env):
             e_canary = max(0.0005, e_stable + noise())
             l_canary = max(0.04, l_stable + noise())
 
-        cpu = max(0.0001, 0.001 + (self.weight * 0.01) + noise())
-        mem = max(12.0, 24.0 + (self.weight * 20.0) + (8.0 if self.scenario == 1 else 0.0) + noise(20.0))
+        cpu_canary = max(0.0001, 0.001 + (self.weight * 0.05) + (0.05 if self.scenario == 2 else 0.0) + noise())
+        cpu_stable = max(0.0001, 0.001 + ((1.0 - self.weight) * 0.05) + noise())
+        
+        mem_canary = max(12.0, 24.0 + (self.weight * 20.0) + (16.0 if self.scenario == 1 else 0.0) + noise(2.0))
+        mem_stable = max(12.0, 24.0 + ((1.0 - self.weight) * 20.0) + noise(2.0))
+        
         rps = max(0.1, 40.0 * self.weight + np.random.normal(0, 2.0))
 
         return {
@@ -110,8 +114,10 @@ class CanaryEnv(gym.Env):
             "e_stable": float(e_stable),
             "l_canary": float(l_canary),
             "l_stable": float(l_stable),
-            "cpu": float(cpu),
-            "mem_mb": float(mem),
+            "cpu_canary": float(cpu_canary),
+            "cpu_stable": float(cpu_stable),
+            "mem_canary_mb": float(mem_canary),
+            "mem_stable_mb": float(mem_stable),
             "rps": float(rps),
         }
 
@@ -124,7 +130,8 @@ class CanaryEnv(gym.Env):
         return np.array([cpu_c, mem_c, lat_c, err_c, traffic_c], dtype=np.float32)
 
     def _get_obs(self):
-        arr = np.stack(list(self.history), axis=1)
+        # Stack along axis=0: each row is a timestep with 5 features → (T, C)
+        arr = np.stack(list(self.history), axis=0)
         return arr.astype(np.float32)
 
     def _update_state(self):

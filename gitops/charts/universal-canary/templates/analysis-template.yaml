@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Values.serviceName }}-eval
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  # Cấu hình 3 tham số động sẽ được Rollout truyền vào
+  args:
+  - name: service-name
+  - name: stable-hash
+  - name: canary-hash
+  - name: target-weight
+  metrics:
+  - name: rl-agent-decision
+    initialDelay: 30s
+    interval: 10s
+    count: 30
+    inconclusiveLimit: 30
+    # Sử dụng Webhook để đấm thẳng vào API của Agent
+    provider:
+      web:
+        url: "http://canary-eval-agent-service.default.svc.cluster.local:8000/api/v1/decision"
+        method: POST
+        # Gói tên service và mã hash thành JSON gửi cho Agent
+        jsonBody:
+          service: {{ `"{{args.service-name}}"` }}
+          namespace: {{ .Values.envNamespace | quote }}
+          stable_hash: {{ `"{{args.stable-hash}}"` }}
+          canary_hash: {{ `"{{args.canary-hash}}"` }}
+          target_weight: {{ `"{{args.target-weight}}"` }}
+    # Thành công khi API trả về biến action = 1 (Promote)
+    successCondition: result.action == 1 
+    # Thất bại (Rollback) khi API trả về action = 2 (Abort)
+    failureCondition: result.action == 2

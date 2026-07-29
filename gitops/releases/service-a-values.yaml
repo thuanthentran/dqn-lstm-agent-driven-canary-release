@@ -1,0 +1,10 @@
+serviceName: service-a
+replicas: 1
+image: ghcr.io/thuanthentran/samplemicroservice:latest
+containerPort: 8000
+portName: http
+env:
+  - name: SERVICE_NAME
+    value: service-a
+  - name: UPSTREAMS
+    value: http://service-c:8000

@@ -1,0 +1,22 @@
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: prometheus-admin
+  namespace: linkerd-viz
+spec:
+  podSelector:
+    matchLabels:
+      component: prometheus
+  port: 9090
+  proxyProtocol: HTTP/1
+---
+apiVersion: policy.linkerd.io/v1alpha1
+kind: ServerAuthorization
+metadata:
+  name: prometheus-allow-all
+  namespace: linkerd-viz
+spec:
+  server:
+    name: prometheus-admin
+  client:
+    unauthenticated: true

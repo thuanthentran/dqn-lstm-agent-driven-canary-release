@@ -3,7 +3,6 @@ kind: Rollout
 metadata:
   # Tên Rollout sẽ tự động lấy theo tên service (vd: paymentservice)
   name: {{ .Values.serviceName }}
-  namespace: default
 spec:
   # Tự động lấy số lượng replicas gán tĩnh từ file values (Ví dụ: 5 pods)
   replicas: {{ .Values.replicas | default 1 }}
@@ -24,32 +23,145 @@ spec:
       containers:
       - name: server
         image: {{ .Values.image }}
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: {{ .Values.containerPort }}
         {{- if .Values.readinessProbe }}
         readinessProbe:
           {{- toYaml .Values.readinessProbe | nindent 10 }}
         {{- end }}
+        {{- if .Values.extraVolumeMounts }}
+        volumeMounts:
+          {{- toYaml .Values.extraVolumeMounts | nindent 10 }}
+        {{- end }}
         env:
         {{- range .Values.env }}
         - name: {{ .name }}
           value: {{ .value | quote }}
         {{- end }} # <--- Chỉ giữ lại 1 end này cho vòng lặp range
+      {{- if .Values.extraVolumes }}
+      volumes:
+        {{- toYaml .Values.extraVolumes | nindent 8 }}
+      {{- end }}
 
   strategy:
     canary:
       canaryService: {{ .Values.serviceName }}-canary
       stableService: {{ .Values.serviceName }}-stable
       
-      # PATCH: Chuyển từ Istio sang Gateway API
+      # PATCH: Chuyển từ Gateway API sang SMI cho Linkerd
       trafficRouting:
-        gatewayAPI:
-          httpRoute: {{ .Values.serviceName }}-route
+        smi:
+          rootService: {{ .Values.serviceName }}
+          trafficSplitName: {{ .Values.serviceName }}-split
             
       steps:
+      {{- if eq .Values.envNamespace "prod" }}
+      # ===============================================
+      # PROD NAMESPACE STEPS
+      # ===============================================
+      - setWeight: 1
+      - pause: {} # Duyệt thủ công ở 1%
       - setWeight: 20
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "20"
       - setWeight: 50
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "50"
       - setWeight: 80
-      - pause: {}
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "80"
+      {{- else if eq .Values.envNamespace "twin" }}
+      # ===============================================
+      # TWIN NAMESPACE STEPS
+      # ===============================================
+      - setWeight: 20
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          # Chạy song song Stress Test Job
+          - templateName: {{ .Values.serviceName }}-loadtest
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "20"
+      - setWeight: 50
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "50"
+      - setWeight: 80
+      - analysis:
+          templates:
+          - templateName: {{ .Values.serviceName }}-eval
+          args:
+          - name: service-name
+            value: {{ .Values.serviceName }}
+          - name: stable-hash
+            valueFrom:
+              podTemplateHashValue: Stable
+          - name: canary-hash
+            valueFrom:
+              podTemplateHashValue: Latest
+          - name: target-weight
+            value: "80"
+      {{- else }}
+      # ===============================================
+      # DEFAULT STEPS
+      # ===============================================
+      - setWeight: 50
+      - pause: {duration: 30s}
+      {{- end }}
