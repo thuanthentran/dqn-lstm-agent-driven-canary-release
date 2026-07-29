@@ -9,7 +9,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: linkerd
+    targetRevision: main
     path: gitops/base
   destination:
     server: 'https://kubernetes.default.svc'
@@ -30,7 +30,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: linkerd
+    targetRevision: main
     path: gitops/charts/bootstrap
     helm:
       parameters:
@@ -55,7 +55,7 @@ spec:
   project: default
   source:
     repoURL: 'https://github.com/thuanthentran/dqn-lstm-agent-driven-canary-release'
-    targetRevision: linkerd
+    targetRevision: main
     path: gitops/charts/bootstrap
     helm:
       parameters:
