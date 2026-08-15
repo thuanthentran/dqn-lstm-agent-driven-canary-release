@@ -1,3 +1,4 @@
+import math
 import random
 from collections import deque
 from os import environ
@@ -9,6 +10,7 @@ from core.feature_pipeline import EPSILON, normalize_raw_metrics
 
 # Scenario / action names for logging
 SCENARIO_NAMES = {0: "Healthy", 1: "Resource Leak", 2: "Ticking Bomb", 3: "Critical Crash", 4: "Stable Equiv"}
+NETWORK_SCENARIO_NAMES = {0: "Stable", 1: "HandoverStorm", 2: "NTNGap", 3: "THzBlockage", 4: "ISACContention"}
 ACTION_NAMES = {0: "Hold", 1: "Promote", 2: "Rollback"}
 
 # Configurable sequence length for Conv1d input (channel-first)
@@ -19,16 +21,27 @@ MAX_STEPS_PER_EPISODE = 50
 
 
 class CanaryEnv(gym.Env):
-    """Gym-like Canary rollout environment that exposes a (C, T) matrix.
+    """Gym-like Canary rollout environment that exposes a (T, C) matrix.
 
-    Observation: shape (5, SEQ_LEN) with channels [CPU, RAM, Latency, Error_Rate, Traffic_Pct]
+    Observation: shape (SEQ_LEN, 12) with channels:
+        [cpu_n, mem_n, l_ratio_n, e_ratio_n, weight_n,
+         handover_n, sinr_n, prb_n, harq_n, ntn_gap_n,
+         isac_n, deploy_age_n]
     Action: Discrete(3): 0=Hold, 1=Promote, 2=Rollback
     """
 
     def __init__(self, seq_len: int = SEQ_LEN):
         super().__init__()
         self.seq_len = int(seq_len)
-        self.num_features = 5
+
+        # --- Dynamic channel list (12 features) ---
+        self.channel_keys = [
+            "cpu_n", "mem_n", "l_ratio_n", "e_ratio_n", "weight_n",
+            "handover_n", "sinr_n", "prb_n", "harq_n", "ntn_gap_n",
+            "isac_n", "deploy_age_n",
+        ]
+        self.num_features = len(self.channel_keys)
+
         self.observation_space = gym.spaces.Box(
             low=0.0,
             high=1.0,
@@ -56,8 +69,16 @@ class CanaryEnv(gym.Env):
         super().reset(seed=seed)
         self.weight = 0.05
         self.step_count = 0
-        if randomize_scenario:
+        
+        if hasattr(self, 'force_scenario') and self.force_scenario is not None:
+            self.scenario = self.force_scenario
+        elif randomize_scenario:
             self.scenario = random.randint(0, 4)
+
+        if hasattr(self, 'force_network_scenario') and self.force_network_scenario is not None:
+            self.network_scenario = self.force_network_scenario
+        elif randomize_scenario:
+            self.network_scenario = random.randint(0, 4)
 
         self.traffic_steps = self._generate_random_steps()
         self.current_step_idx = 0
@@ -74,31 +95,173 @@ class CanaryEnv(gym.Env):
         for _ in range(self.seq_len):
             self.history.append(initial_channels)
 
+        # Rolling-window buffer for smoothed anomaly/healthy checks in step().
+        # Pre-fill with initial ratios to avoid cold-start bias in first steps.
+        # Fix for false-trigger from single-step noise spikes, discovered via
+        # test_promote_not_penalized_by_pure_network_noise.
+        init_e_ratio = raw["e_canary"] / max(raw["e_stable"], EPSILON)
+        init_l_ratio = raw["l_canary"] / max(raw["l_stable"], EPSILON)
+        self.ratio_window = deque(maxlen=4)
+        for _ in range(4):
+            self.ratio_window.append((init_e_ratio, init_l_ratio))
+
         return self._get_obs(), {}
 
+    # ------------------------------------------------------------------
+    # 6G Network noise — independent of app-layer scenario
+    # ------------------------------------------------------------------
+    def _network_noise_factor(self):
+        """Compute network-layer noise based on self.network_scenario.
+
+        Returns:
+            burst_factor (float): multiplier for latency (applied symmetrically
+                to both canary and stable).
+            network_raw (dict): raw 6G telemetry signals.
+        """
+        sc = getattr(self, "network_scenario", 0)
+        t = self.step_count
+
+        if sc == 0:  # Stable
+            burst = 1.0
+            network_raw = {
+                "handover_count": 0,
+                "sinr_db": -85.0 + np.random.normal(0, 1.0),
+                "prb_util": 0.4,
+                "harq_nack": 0.02,
+                "ntn_gap": 0,
+                "isac_contention": 0.0,
+            }
+
+        elif sc == 1:  # HandoverStorm
+            burst = 1.0 + 0.4 * math.sin(t) ** 2
+            network_raw = {
+                "handover_count": random.randint(2, 5),
+                "sinr_db": -95.0 + np.random.normal(0, 5.0),
+                "prb_util": 0.6,
+                "harq_nack": 0.06,
+                "ntn_gap": 0,
+                "isac_contention": 0.0,
+            }
+
+        elif sc == 2:  # NTNGap
+            in_gap = (t % 12) < 2
+            if in_gap:
+                burst = 2.5
+                network_raw = {
+                    "handover_count": 0,
+                    "sinr_db": -110.0 + np.random.normal(0, 2.0),
+                    "prb_util": 0.4,
+                    "harq_nack": 0.15,
+                    "ntn_gap": 1,
+                    "isac_contention": 0.0,
+                }
+            else:
+                burst = 1.0
+                network_raw = {
+                    "handover_count": 0,
+                    "sinr_db": -85.0 + np.random.normal(0, 1.0),
+                    "prb_util": 0.4,
+                    "harq_nack": 0.02,
+                    "ntn_gap": 0,
+                    "isac_contention": 0.0,
+                }
+
+        elif sc == 3:  # THzBlockage
+            blocked = (t % 15) < 3
+            if blocked:
+                burst = 3.0
+                network_raw = {
+                    "handover_count": 0,
+                    "sinr_db": -120.0 + np.random.normal(0, 2.0),
+                    "prb_util": 0.4,
+                    "harq_nack": 0.2,
+                    "ntn_gap": 0,
+                    "isac_contention": 0.0,
+                }
+            else:
+                burst = 1.0
+                network_raw = {
+                    "handover_count": 0,
+                    "sinr_db": -85.0 + np.random.normal(0, 1.0),
+                    "prb_util": 0.4,
+                    "harq_nack": 0.02,
+                    "ntn_gap": 0,
+                    "isac_contention": 0.0,
+                }
+
+        elif sc == 4:  # ISACContention
+            contention = 0.3 + 0.3 * math.sin(t * 0.5) ** 2
+            burst = 1.0 + contention
+            network_raw = {
+                "handover_count": 0,
+                "sinr_db": -85.0 + np.random.normal(0, 1.0),
+                "prb_util": 0.4,
+                "harq_nack": 0.02,
+                "ntn_gap": 0,
+                "isac_contention": contention,
+            }
+
+        else:  # fallback — Stable
+            burst = 1.0
+            network_raw = {
+                "handover_count": 0,
+                "sinr_db": -85.0,
+                "prb_util": 0.4,
+                "harq_nack": 0.02,
+                "ntn_gap": 0,
+                "isac_contention": 0.0,
+            }
+
+        return burst, network_raw
+
     def _build_raw_metrics(self):
+        # Additive noise for latency/cpu/mem (base values >> noise std, no clamp issue).
         noise = lambda s=1.0: np.random.normal(0, 0.01 * s)
-        e_stable = max(0.0005, 0.001 + noise())
+
+        # Multiplicative noise for error rates — fix for false-trigger bug:
+        # Old additive noise N(0, 0.01) on base~0.001 was 10x the signal,
+        # combined with max(0.0005,...) floor clamp, created asymmetric ratio
+        # spikes >2.0 in ~15-20% of steps even for Healthy app.
+        # Multiplicative noise (8% relative std) keeps noise proportional
+        # to signal magnitude. At 8%, worst-case single-step e_ratio is
+        # ~1.94 (4σ: 1.32/0.68), and with rolling window=4 smoothing the
+        # mean stays well under the 2.0 anomaly threshold.
+        # 15% was too high: ratio reached 2.0 at ~4σ, guaranteed to hit
+        # over 2000+ trial-steps in tests.
+        # Discovered via test_promote_not_penalized_by_pure_network_noise.
+        rel_noise = lambda scale=1.0: np.random.normal(0, 0.08 * scale)
+
+        e_stable = max(EPSILON, 0.001 * (1.0 + rel_noise()))
         l_stable = max(0.04, 0.095 + noise())
 
         if getattr(self, "scenario", 0) == 0:
-            e_canary = max(0.0005, 0.001 + noise())
+            e_canary = max(EPSILON, 0.001 * (1.0 + rel_noise()))
             l_canary = max(0.04, 0.09 + noise())
         elif self.scenario == 1:
-            e_canary = max(0.0005, 0.003 + (self.weight * 0.03) + noise())
+            base_e = 0.003 + (self.weight * 0.03)
+            e_canary = max(EPSILON, base_e * (1.0 + rel_noise()))
             l_canary = max(0.05, 0.11 + (self.weight * 0.6) + (self.step_count * 0.01) + noise())
         elif self.scenario == 2:
             if self.weight > 0.25:
-                e_canary = max(0.001, 0.02 + (self.weight - 0.25) * 1.5 + noise())
+                base_e = 0.02 + (self.weight - 0.25) * 1.5
+                e_canary = max(EPSILON, base_e * (1.0 + rel_noise()))
             else:
-                e_canary = max(0.0005, 0.001 + noise())
+                e_canary = max(EPSILON, 0.001 * (1.0 + rel_noise()))
             l_canary = max(0.05, 0.12 + (self.weight * 0.2) + noise())
         elif self.scenario == 3:
-            e_canary = max(0.2, 0.45 + noise(2.0))
+            e_canary = max(EPSILON, 0.45 * (1.0 + rel_noise(2.0)))
             l_canary = max(0.12, 0.18 + noise())
         else:
-            e_canary = max(0.0005, e_stable + noise())
+            e_canary = max(EPSILON, e_stable * (1.0 + rel_noise()))
             l_canary = max(0.04, l_stable + noise())
+
+        # --- Apply network burst symmetrically to BOTH canary and stable ---
+        # Both share the same physical RAN infrastructure, so network noise
+        # must affect both equally. Only app-layer faults should cause
+        # systematic divergence in l_ratio.
+        burst_factor, network_raw = self._network_noise_factor()
+        l_canary *= burst_factor
+        l_stable *= burst_factor
 
         cpu_canary = max(0.0001, 0.001 + (self.weight * 0.05) + (0.05 if self.scenario == 2 else 0.0) + noise())
         cpu_stable = max(0.0001, 0.001 + ((1.0 - self.weight) * 0.05) + noise())
@@ -108,7 +271,7 @@ class CanaryEnv(gym.Env):
         
         rps = max(0.1, 40.0 * self.weight + np.random.normal(0, 2.0))
 
-        return {
+        raw = {
             "weight_pct": float(self.weight * 100.0),
             "e_canary": float(e_canary),
             "e_stable": float(e_stable),
@@ -119,18 +282,18 @@ class CanaryEnv(gym.Env):
             "mem_canary_mb": float(mem_canary),
             "mem_stable_mb": float(mem_stable),
             "rps": float(rps),
+            "time_since_deploy": self.step_count,
         }
+        # Merge 6G network telemetry
+        raw.update(network_raw)
+
+        return raw
 
     def _raw_to_channels(self, raw: dict, norm: dict):
-        cpu_c = norm.get("cpu_n", 0.0)
-        mem_c = norm.get("mem_n", 0.0)
-        lat_c = norm.get("l_ratio_n", 0.0)
-        err_c = norm.get("e_ratio_n", 0.0)
-        traffic_c = norm.get("weight_n", 0.0)
-        return np.array([cpu_c, mem_c, lat_c, err_c, traffic_c], dtype=np.float32)
+        return np.array([norm[k] for k in self.channel_keys], dtype=np.float32)
 
     def _get_obs(self):
-        # Stack along axis=0: each row is a timestep with 5 features → (T, C)
+        # Stack along axis=0: each row is a timestep with num_features features → (T, C)
         arr = np.stack(list(self.history), axis=0)
         return arr.astype(np.float32)
 
@@ -149,8 +312,18 @@ class CanaryEnv(gym.Env):
         e_ratio = self.latest_raw["e_canary"] / max(self.latest_raw["e_stable"], EPSILON)
         l_ratio = self.latest_raw["l_canary"] / max(self.latest_raw["l_stable"], EPSILON)
 
-        current_healthy = (self.latest_norm["e_ratio_n"] <= 0.4) and (self.latest_norm["l_ratio_n"] <= 0.4)
-        current_anomalous = (e_ratio > 2.0) or (l_ratio > 2.0)
+        # Rolling-window smoothed anomaly/healthy check — fix for false-trigger
+        # from single-step noise spikes. Uses mean of last 4 raw ratios instead
+        # of instantaneous value, matching the multi-step observation window
+        # the model uses (seq_len=30). Window=4 is short enough to still detect
+        # real app faults within a few steps (verified by
+        # test_critical_crash_still_detected_after_smoothing).
+        self.ratio_window.append((e_ratio, l_ratio))
+        e_ratio_smoothed = float(np.mean([r[0] for r in self.ratio_window]))
+        l_ratio_smoothed = float(np.mean([r[1] for r in self.ratio_window]))
+
+        current_healthy = (e_ratio_smoothed <= 2.0) and (l_ratio_smoothed <= 2.0)
+        current_anomalous = (e_ratio_smoothed > 2.0) or (l_ratio_smoothed > 2.0)
         promote_step = 0.2
 
         if action == 0:

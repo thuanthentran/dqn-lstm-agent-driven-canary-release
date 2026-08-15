@@ -1,14 +1,14 @@
-# K8s RL Canary Agent (Linkerd & SMI)
+# K8s RL Canary Agent (Linkerd & SMI) - 6G Edition
 
 Kho lưu trữ này chứa một môi trường Sandbox "Digital Twin" chuyên dụng, được thiết kế để huấn luyện và vận hành một Tác tử Học tăng cường (Reinforcement Learning - TransformerPPO) làm nhiệm vụ quản lý quá trình phát hành Canary trên Kubernetes một cách tự động và an toàn.
 
-Kiến trúc này tận dụng **Cilium (CNI)** làm lớp mạng cơ sở, **Linkerd Service Mesh** để định tuyến luồng traffic L7 và thu thập metrics (thông qua linkerd-viz proxy), và **Argo Rollouts** kết hợp với **Linkerd-SMI** để quản lý vòng đời và điều hướng traffic cho bản Canary.
+Đặc biệt, Agent trong phiên bản này đã được **nâng cấp để nhận diện và thích ứng với môi trường mạng 6G**. Agent có khả năng phân biệt giữa biến động metrics do lỗi ứng dụng (Application Faults) và biến động do sóng vô tuyến 6G (Network Noise như đứt sóng vệ tinh NTN, vật cản THz, xung đột radar ISAC).
 
 ---
 
 ## 🏗 System Architecture (Kiến trúc hệ thống)
 
-Hệ thống hoạt động dưới 2 chế độ riêng biệt: **Huấn luyện (External Controller)** và **Vận hành thực tế (Native GitOps Webhook)**. Dưới đây là sơ đồ luồng hoạt động tổng quát:
+Hệ thống hoạt động dưới 2 chế độ riêng biệt: **Huấn luyện (Offline Training Twin)** và **Vận hành thực tế (GitOps Webhook)**. Dưới đây là sơ đồ luồng hoạt động tổng quát:
 
 ```mermaid
 sequenceDiagram
@@ -30,8 +30,8 @@ sequenceDiagram
     
     Note over Agent, Prom: Agent ra quyết định (AnalysisRun)
     Argo->>Agent: HTTP POST (Gửi hash của Canary & Stable)
-    Agent->>Prom: PromQL: Kéo metrics thực tế của bản Canary & Stable
-    Prom-->>Agent: Trả về trạng thái (State: [CPU, RAM, Lat, Err])
+    Agent->>Prom: PromQL: Kéo metrics 12-kênh (App Metrics + 6G Metrics)
+    Prom-->>Agent: Trả về trạng thái (State: [CPU, RAM, Lat, Err, Handover, SINR, PRB, ...])
     Agent->>Agent: Mạng Nơ-ron suy luận (Action: PROMOTE / ABORT / HOLD)
     Agent->>Argo: Trả về Quyết định (JSON: action=1, 2, hoặc 0)
     
@@ -49,12 +49,13 @@ Hãy làm theo các bước dưới đây để tái tạo lại chính xác ki�
 
 Trước khi khởi tạo cụm, ta cần chuẩn bị OS (Ubuntu/Debian/WSL) bằng cách tắt Swap, nạp kernel modules và cài đặt `containerd`, `kubelet`, `kubeadm`, `kubectl`. Khởi tạo cụm K8s nhưng **bỏ qua** cài đặt Kube-proxy mặc định để Cilium eBPF thay thế hoàn toàn.
 
+### 1. Tắt Swap (Bắt buộc cho K8s)
 ```bash
-# 1. Tắt Swap (Bắt buộc cho K8s)
 sudo swapoff -a
 sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
-
-# 2. Nạp module và cấu hình mạng (IPv4 forwarding)
+```
+### 2. Nạp module và cấu hình mạng (IPv4 forwarding)
+```bash
 cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
 overlay
 br_netfilter
@@ -66,52 +67,78 @@ net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
 sudo sysctl --system
-
-# 3. Cài đặt Containerd và Kubeadm, Kubelet, Kubectl
+```
+### 3. Cài đặt Containerd và Kubeadm, Kubelet, Kubectl
+```bash
 sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates curl containerd
 sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 sudo apt-get update && sudo apt-get install -y kubelet kubeadm kubectl
 sudo apt-mark hold kubelet kubeadm kubectl
+```
 
-# 4. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định
+### 4. Khởi tạo K8s cluster KHÔNG có Kube-proxy mặc định
+```bash
 sudo kubeadm init --skip-phases=addon/kube-proxy
-
-# 5. Cấu hình Kubeconfig
+```
+### 5. Cấu hình Kubeconfig
+```bash
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
+```
+### 6. Cài đặt Cilium CLI và Cilium CNI
+```bash
+# Cài đặt Cilium CLI
+CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+CLI_ARCH=amd64
+if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
 
-# 6. Cài đặt Cilium (CNI)
+# Cài đặt Cilium (CNI)
 cilium install \
   --set kubeProxyReplacement=true \
   --set hubble.enabled=true \
   --set hubble.metrics.enableOpenMetrics=true \
   --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,httpV2:exemplars=true;labelsContext=source_ip\,source_namespace\,source_workload\,destination_ip\,destination_namespace\,destination_workload\,traffic_direction}"
-
-# 7. Cài đặt Linkerd CLI & Linkerd Control Plane
+```
+### 7. Cài đặt Linkerd CLI, Control Plane & Viz
+```bash
 curl --proto '=https' --tlsv1.2 -sSfL https://run.linkerd.io/install | sh
 export PATH=$PATH:$HOME/.linkerd2/bin
 linkerd install --crds | kubectl apply -f -
 linkerd install | kubectl apply -f -
 linkerd check
 
-# 8. Cài đặt ArgoCD (GitOps Controller)
+# Cài đặt Linkerd-Viz
+linkerd viz install | kubectl apply -f -
+linkerd viz check
+```
+
+### 8. Cài đặt ArgoCD (GitOps Controller) & Argo Rollouts
+```bash
+# Cài đặt ArgoCD
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
-# 9. Triển khai tự động toàn bộ hệ thống (One-click GitOps)
+# Cài đặt Argo Rollouts
+kubectl create namespace argo-rollouts
+kubectl apply -n argo-rollouts -f https://github.com/argoproj/argo-rollouts/releases/latest/download/install.yaml
+
+# Cài đặt kubectl plugin cho Argo Rollouts
+curl -LO https://github.com/argoproj/argo-rollouts/releases/latest/download/kubectl-argo-rollouts-linux-amd64
+chmod +x ./kubectl-argo-rollouts-linux-amd64
+sudo mv ./kubectl-argo-rollouts-linux-amd64 /usr/local/bin/kubectl-argo-rollouts
+```
+### 9. Triển khai tự động toàn bộ hệ thống (One-click GitOps)
+```bash
 # Cài đặt theo thứ tự: Monitoring -> Base (CRDs) -> Linkerd SMI -> Microservices
 kubectl apply -f root-app.yaml
 ```
-
-*(Lưu ý: Bạn có thể hoàn toàn bỏ qua các cài đặt thủ công ở dưới nếu dùng lệnh `kubectl apply -f root-app.yaml` vì ArgoCD đã tự động lo liệu qua các Sync Waves).*
-
-### 2. Triển khai Monitoring (Prometheus) & Argo Rollouts
-Chúng ta sử dụng Kube-Prometheus-Stack để scraping metrics từ Linkerd. Argo Rollouts đóng vai trò quản lý vòng đời Canary và điều khiển traffic thông qua đặc tả Linkerd SMI.
-*(Tất cả cấu hình này đều có sẵn trong thư mục `gitops/` và tự động áp dụng thông qua ArgoCD).*
-
 ---
 
 ## 🌩️ GitOps & Chaos Testing (Thử nghiệm với RL Agent)
@@ -143,22 +170,6 @@ wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
 ]'
 ```
 
-**Kịch bản 3: Test Ngốn CPU (High CPU)**
-```bash
-wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
-  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_CPU_BURN_ITERS"}, 
-  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "5000000"}
-]'
-```
-
-**Kịch bản 4: Test Ngốn RAM (High RAM / OOM - 256MB)**
-```bash
-wsl -d k3s kubectl patch rollout service-b -n twin --type=json -p='[
-  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/name", "value": "CHAOS_MEM_ALLOC_MB"}, 
-  {"op": "replace", "path": "/spec/template/spec/containers/0/env/2/value", "value": "256"}
-]'
-```
-
 **Cách giám sát Agent:**
 Theo dõi `AnalysisRun` sinh ra:
 ```bash
@@ -171,15 +182,21 @@ Bật **ArgoCD UI** -> Nhấn **SYNC** ứng dụng `service-b-twin`. Mọi tr�
 
 ---
 
-## 🧠 Tổng quan Pipeline Huấn luyện (Training)
+## 🧠 Tổng quan Pipeline Huấn luyện (Offline Training)
 
-Nếu bạn muốn tự huấn luyện (Train) lại RL Agent trên cụm K8s thực tế, chạy lệnh:
+Để huấn luyện (Train) lại RL Agent cho môi trường 6G, dự án cung cấp một Simulator mạnh mẽ (Digital Twin) với 12 kênh (channels) thông số. Môi trường này mô phỏng các kịch bản lỗi hệ thống (Crash, Leak) hòa trộn cùng các kịch bản nhiễu sóng vật lý 6G (Handover Storm, NTN Gap, THz Blockage, ISAC Contention). 
+
+Để bắt đầu quy trình huấn luyện TransformerPPO (150,000 steps), hãy chạy lệnh:
 ```bash
-python training/online_training.py
+python training/offline_training.py
 ```
-- Script sẽ liên tục đưa môi trường về trạng thái Stable, sau đó tự động bơm ngẫu nhiên các kịch bản lỗi qua `FAULT_SCENARIO` trong Pod.
-- Agent cào metrics từ Prometheus, phân tích trạng thái (State) và xuất Action (Thao túng K8s).
-- Nó sẽ tự cập nhật hàm chính sách (Policy) dựa trên các phần thưởng/hình phạt (Rewards) do các quyết định đúng/sai mang lại.
+
+- Mã nguồn mô phỏng nằm tại `core/env.py`.
+- Model sẽ tự đánh giá (validate) vào cuối phiên huấn luyện và tự động xuất sơ đồ hội tụ vào thư mục `logs/transformer_offline`. 
+- **Theo dõi biểu đồ Tensorboard thời gian thực:**
+  ```bash
+  tensorboard --logdir logs/transformer_offline
+  ```
 
 ---
 

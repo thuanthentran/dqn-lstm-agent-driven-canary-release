@@ -21,6 +21,13 @@ RAW_KEYS = [
     "mem_canary_mb",
     "mem_stable_mb",
     "rps",
+    "handover_count",
+    "sinr_db",
+    "prb_util",
+    "harq_nack",
+    "ntn_gap",
+    "isac_contention",
+    "time_since_deploy",
 ]
 
 STATE_KEYS = [
@@ -32,6 +39,13 @@ STATE_KEYS = [
     "cpu_n",
     "mem_n",
     "rps_n",
+    "handover_n",
+    "sinr_n",
+    "prb_n",
+    "harq_n",
+    "ntn_gap_n",
+    "isac_n",
+    "deploy_age_n",
 ]
 
 
@@ -67,6 +81,14 @@ def normalize_raw_metrics(raw: Dict[str, float]) -> Dict[str, float]:
         "cpu_n": _clip(cpu_ratio / MAX_RATIO, 0.0, 1.0),
         "mem_n": _clip(mem_ratio / MAX_RATIO, 0.0, 1.0),
         "rps_n": _clip(float(raw.get("rps", 0.0)) / RPS_REF, 0.0, 1.0),
+        # --- 6G network channels ---
+        "handover_n":   _clip(raw.get("handover_count", 0) / 5.0, 0.0, 1.0),
+        "sinr_n":       _clip((raw.get("sinr_db", -85.0) + 130.0) / 60.0, 0.0, 1.0),
+        "prb_n":        _clip(raw.get("prb_util", 0.0), 0.0, 1.0),
+        "harq_n":       _clip(raw.get("harq_nack", 0.0) / 0.3, 0.0, 1.0),
+        "ntn_gap_n":    _clip(raw.get("ntn_gap", 0.0), 0.0, 1.0),
+        "isac_n":       _clip(raw.get("isac_contention", 0.0), 0.0, 1.0),
+        "deploy_age_n": _clip(raw.get("time_since_deploy", 0.0) / 300.0, 0.0, 1.0),
     }
 
     return state

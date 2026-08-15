@@ -1,10 +1,10 @@
 """TransformerFeatureExtractor for Stable-Baselines3 PPO.
 
 Provides explainable AI through two attention mechanisms:
-  - Feature Attention: which of the 5 input features matter most at each timestep
+  - Feature Attention: which of the n_features input features matter most at each timestep
   - Temporal Attention: which past timesteps the agent is attending to
 
-Input observation shape: (batch, seq_len=30, n_features=5)
+Input observation shape: (batch, seq_len, n_features)
 Output: (batch, features_dim=d_model)
 """
 
@@ -20,7 +20,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 class FeatureAttentionLayer(nn.Module):
     """Per-timestep cross-attention over input features.
 
-    For each timestep, treats the 5 raw feature values as 5 tokens and
+    For each timestep, treats the n_features raw feature values as tokens and
     uses a learnable aggregation query to attend over them.
 
     Input:  (B, T, n_features)
@@ -146,7 +146,7 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
     """SB3-compatible Transformer feature extractor with explainable attention.
 
     Architecture:
-        1. Feature Attention: cross-attention aggregating 5 features per timestep
+        1. Feature Attention: cross-attention aggregating n_features features per timestep
         2. Positional Encoding: learnable position embeddings
         3. Temporal Transformer: self-attention over the time axis
         4. Mean Pooling → features_dim output
@@ -189,12 +189,12 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, observations: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            observations: (B, seq_len, n_features) = (B, 30, 5)
+            observations: (B, seq_len, n_features)
         Returns:
             features: (B, d_model) = (B, 64)
         """
         # 1. Feature Attention
-        x, feat_attn = self.feature_attention(observations)  # x: (B,T,d), feat_attn: (B,nh,T,5)
+        x, feat_attn = self.feature_attention(observations)  # x: (B,T,d), feat_attn: (B,nh,T,C)
 
         # 2. Add positional encoding
         x = x + self.pos_embed

@@ -29,15 +29,17 @@ NORM_SAVE_PATH = os.path.join(BASE_DIR, "models", "vec_normalize.pkl")
 TOTAL_TIMESTEPS = 150_000
 
 # --- CẤU HÌNH TRANSFORMER ---
+_tmp_env = CanaryEnv()
 TRANSFORMER_CONFIG = {
     "d_model": 64,
     "n_heads": 4,
-    "n_heads_feature": 1,
+    "n_heads_feature": 4,
     "n_layers": 2,
     "seq_len": 30,
-    "n_features": 5,
+    "n_features": _tmp_env.num_features,
     "dropout": 0.1,
 }
+del _tmp_env
 
 # --- THIẾT BỊ ---
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,7 +70,7 @@ def make_env(log_dir: str):
 
 def build_env(log_dir: str):
     env = DummyVecEnv([make_env(log_dir)])
-    env = VecNormalize(env, norm_obs=True, norm_reward=True, clip_obs=10.0)
+    env = VecNormalize(env, norm_obs=False, norm_reward=True, clip_obs=10.0)
     return env
 
 
@@ -155,6 +157,12 @@ def train() -> None:
     print(f"   Config: {TRANSFORMER_CONFIG}")
 
     progress_cb = ProgressCallback(TOTAL_TIMESTEPS)
+    
+    print("-" * 50)
+    print(f"📊 Để xem đồ thị Tensorboard (Real-time), hãy mở Terminal/CMD mới và chạy:")
+    print(f"   tensorboard --logdir \"{LOG_DIR}\"")
+    print("-" * 50)
+
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=progress_cb)
 
     # Lưu model cục bộ
