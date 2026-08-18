@@ -1,7 +1,9 @@
 {{- if not .Values.isLoadGenerator }}
 # =========================================================
 # Istio VirtualService
-# Argo Rollouts will automatically adjust stable/canary weights during rollout
+# Argo Rollouts will automatically adjust stable/canary weights during rollout.
+# retries.attempts=0 disables Envoy auto-retry so the RL agent sees raw
+# failure signals instead of masked/healed errors.
 # =========================================================
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
@@ -13,7 +15,10 @@ spec:
   hosts:
   - {{ .Values.serviceName }}
   http:
-  - route:
+  - retries:
+      attempts: 0         # Disable Envoy retry — RL agent must see raw errors
+    timeout: 5s           # Hard timeout per request
+    route:
     - destination:
         host: {{ .Values.serviceName }}
         subset: stable
