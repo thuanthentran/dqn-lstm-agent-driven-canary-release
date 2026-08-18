@@ -2,7 +2,7 @@ name: Build and Push Agent
 
 on:
   push:
-    branches: ["main"]
+    branches: ["istio"]
     paths:
       - 'services/agent/**'
   workflow_dispatch:
