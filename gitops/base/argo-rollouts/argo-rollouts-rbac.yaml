@@ -1,12 +1,13 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: argo-rollouts-gatewayapi-access
+  name: argo-rollouts-istio-access
 rules:
 - apiGroups:
-  - gateway.networking.k8s.io
+  - networking.istio.io
   resources:
-  - httproutes
+  - virtualservices
+  - destinationrules
   verbs:
   - get
   - list
@@ -17,11 +18,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: argo-rollouts-gatewayapi-access-binding
+  name: argo-rollouts-istio-access-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: argo-rollouts-gatewayapi-access
+  name: argo-rollouts-istio-access
 subjects:
 - kind: ServiceAccount
   name: argo-rollouts

@@ -26,7 +26,7 @@ from core.model import TransformerFeatureExtractor
 LOG_DIR = os.path.join(BASE_DIR, "logs", "transformer_offline")
 SAVE_PATH = os.path.join(BASE_DIR, "models", "ppo_transformer_offline_best")
 NORM_SAVE_PATH = os.path.join(BASE_DIR, "models", "vec_normalize.pkl")
-TOTAL_TIMESTEPS = 150_000
+TOTAL_TIMESTEPS = 200_000
 
 # --- CẤU HÌNH TRANSFORMER ---
 _tmp_env = CanaryEnv()

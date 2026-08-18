@@ -1,3 +1,4 @@
+{{- if not .Values.isLoadGenerator }}
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
@@ -49,11 +50,15 @@ spec:
       canaryService: {{ .Values.serviceName }}-canary
       stableService: {{ .Values.serviceName }}-stable
       
-      # PATCH: Chuyển từ Gateway API sang SMI cho Linkerd
+      # Istio traffic routing: Argo Rollouts adjusts VirtualService weights automatically
       trafficRouting:
-        smi:
-          rootService: {{ .Values.serviceName }}
-          trafficSplitName: {{ .Values.serviceName }}-split
+        istio:
+          virtualService:
+            name: {{ .Values.serviceName }}-vsvc
+          destinationRule:
+            name: {{ .Values.serviceName }}-destrule
+            canarySubsetName: canary
+            stableSubsetName: stable
             
       steps:
       {{- if eq .Values.envNamespace "prod" }}
@@ -165,3 +170,4 @@ spec:
       - setWeight: 50
       - pause: {duration: 30s}
       {{- end }}
+{{- end }}

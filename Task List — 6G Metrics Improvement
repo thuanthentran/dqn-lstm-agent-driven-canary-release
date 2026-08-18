@@ -1,0 +1,21 @@
+# Task List — 6G Metrics Improvement
+
+## Phase 1: Python Pipeline (Windows — no NS-3 needed)
+- [x] Update `feature_pipeline.py` — fix SINR normalization, add RSRP/packet_loss/jitter
+- [x] Update `env.py` — fix network noise values, add new metrics, 15 channels
+- [x] Update `env_ns3.py` — read enriched CSV, extract metrics directly from traces
+- [x] Update `model.py` — default n_features to 15
+
+## Phase 2: Tests & Validation
+- [x] Update `test_network_noise.py` — new shapes, new metrics, new SINR ranges
+- [x] Run tests → all pass
+
+## Phase 3: Training & Evaluation Scripts
+- [x] Update `offline_training.py` — TOTAL_TIMESTEPS to 200K
+- [x] Update `evaluate_ns3.py` — FEATURE_NAMES with 3 new names
+- [x] Retrain model
+
+## Phase 4: NS-3 Scenarios (Linux/WSL)
+- [x] Update all 5 `.cc` scenarios — simTime=30s, PHY traces, enriched CSV
+- [ ] Generate new traces
+- [x] Evaluate model against 5 new ns-3 traces (Stable, Handover, NTN, Blockage, ISAC)

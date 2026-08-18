@@ -5,18 +5,50 @@ global:
   destinationNamespace: default
 
 services:
+  - name: adservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/adservice-values.yaml
+
+  - name: cartservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/cartservice-values.yaml
+
+  - name: checkoutservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/checkoutservice-values.yaml
+
+  - name: currencyservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/currencyservice-values.yaml
+
+  - name: emailservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/emailservice-values.yaml
+
   - name: frontend
     chartPath: gitops/charts/universal-canary
     valueFile: ../../releases/frontend-values.yaml
-    
-  - name: service-a
+
+  - name: loadgenerator
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/service-a-values.yaml
-    
-  - name: service-b
+    valueFile: ../../releases/loadgenerator-values.yaml
+
+  - name: paymentservice
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/service-b-values.yaml
-    
-  - name: service-c
+    valueFile: ../../releases/paymentservice-values.yaml
+
+  - name: productcatalogservice
     chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/service-c-values.yaml
+    valueFile: ../../releases/productcatalogservice-values.yaml
+
+  - name: recommendationservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/recommendationservice-values.yaml
+
+  - name: shippingservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/shippingservice-values.yaml
+
+  - name: shoppingassistantservice
+    chartPath: gitops/charts/universal-canary
+    valueFile: ../../releases/shoppingassistantservice-values.yaml

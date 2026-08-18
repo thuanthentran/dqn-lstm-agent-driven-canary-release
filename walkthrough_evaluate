@@ -1,0 +1,35 @@
+# Walkthrough: RL Agent Evaluation on NS-3 6G Network Scenarios
+
+## 1. Overview
+We successfully completed the end-to-end integration and evaluation of our Transformer PPO Reinforcement Learning Agent against the NS-3 6G Network Simulator. 
+
+This completes the loop of:
+`NS-3 (C++ PHY Simulation)` ➔ `CSV Telemetry Traces` ➔ `Python Gym Environment` ➔ `RL Agent Evaluation`
+
+## 2. NS-3 Scenario Simulations (WSL & C++)
+We patched and executed 5 distinct NS-3 scenarios using the 3GPP TR 38.901 NR Channel model at 28GHz:
+
+1. **Stable Scenario (`cttc-nr-scenario-stable.cc`)**: Baseline environment. Super low delay (~0.5ms) and 0 packet loss.
+2. **Handover Storm (`cttc-nr-scenario-handover-storm.cc`)**: Simulated a high-speed UE moving across 3 gNBs causing frequent ping-pong handovers. Resulted in macro packet loss and >100ms jitter.
+3. **ISAC Contention (`cttc-nr-scenario-isac-contention.cc`)**: Integrated Sensing and Communication. We injected 46 Mbps of highly variable sinusoidal noise traffic. The 6G network absorbed it with minimal impact.
+4. **THz Blockage (`cttc-nr-scenario-thz-blockage.cc`)**: Simulated physical line-of-sight blockage reducing signal by 60dB. Caused massive data starvation and delay spikes (up to 31ms).
+5. **NTN Satellite Gap (`cttc-nr-scenario-ntn-gap.cc`)**: Simulated Non-Terrestrial Network communication drop-offs. (Successfully patched `NS_FATAL` callback issue).
+
+## 3. RL Model Evaluation (Transformer PPO)
+We ran the validation script (`evaluate_ns3.py`) across 25 episodes (5 Application States × 5 NS-3 Network States).
+
+### Results
+- **Mean Reward**: `10.60 ± 6.48`
+- **Min Reward**: `5.00`
+- **Max Reward**: `20.00`
+- **Status**: ✅ **PASSED** (Target was ≥ 5.0)
+
+### Agent Behavior Analysis
+- **App = Critical Crash / Resource Leak**: The Agent's Attention mechanism correctly prioritized the soaring `Error_Rate` and instantly took the **`Rollback`** action at Step 1, minimizing blast radius. (Reward: 5.0)
+- **App = Healthy / Stable Equiv**: The Agent observed normal latency/traffic features, deciding to **`Promote`** through all 5 canary steps until full deployment. (Reward: 20.0)
+- **Net = Handover Storm / Blockage**: Even with network noise injected (simulated 100ms latency spikes from Handover, or massive packet loss from Blockage), the Attention mask successfully differentiated between *Network-induced anomalies* and *Application-induced anomalies*, allowing Healthy applications to proceed to production despite a noisy network.
+
+## 4. Conclusion
+The pipeline is fully operational. We have successfully proven that an RL Agent can manage Canary Releases in a complex, volatile 6G environment by understanding the contextual difference between Application faults and Network impairments. 
+
+The heatmaps for the Attention layers are saved in `logs/attention_heatmaps_ns3`.

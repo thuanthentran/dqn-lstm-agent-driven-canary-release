@@ -1,0 +1,46 @@
+{{- if not .Values.isLoadGenerator }}
+# =========================================================
+# Istio VirtualService
+# Argo Rollouts will automatically adjust stable/canary weights during rollout
+# =========================================================
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ .Values.serviceName }}-vsvc
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  hosts:
+  - {{ .Values.serviceName }}
+  http:
+  - route:
+    - destination:
+        host: {{ .Values.serviceName }}
+        subset: stable
+      weight: 100
+    - destination:
+        host: {{ .Values.serviceName }}
+        subset: canary
+      weight: 0
+---
+# =========================================================
+# Istio DestinationRule
+# Defines stable and canary subsets; Argo Rollouts injects
+# pod-template-hash labels at runtime to pin traffic.
+# =========================================================
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: {{ .Values.serviceName }}-destrule
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  host: {{ .Values.serviceName }}
+  subsets:
+  - name: stable
+    labels:
+      app: {{ .Values.serviceName }}
+  - name: canary
+    labels:
+      app: {{ .Values.serviceName }}
+{{- end }}

@@ -80,6 +80,19 @@ static double g_originalTxPowerBwp1 = 0.0;
 static bool g_blockageActive = false;
 static uint32_t g_blockageStep = 0;
 
+// Global PHY-layer telemetry
+static double g_lastSinrDb = 20.0;
+static double g_lastRsrpDbm = -75.0;
+
+void RecordDlDataSinr(uint16_t cellId, uint16_t rnti, double sinr, uint16_t ccId) {
+    g_lastSinrDb = (sinr > 0) ? 10.0 * std::log10(sinr) : -30.0;
+}
+
+void RecordReportRsrp(uint16_t p1, uint16_t p2, uint16_t p3, double rsrp, uint8_t ccId) {
+    g_lastRsrpDbm = (rsrp > 0) ? 10.0 * std::log10(rsrp * 1000.0) : -140.0;
+}
+
+
 /**
  * Toggle blockage on/off following step % 15 < 3 pattern.
  * During blockage, gNB TxPower is dropped to 5 dBm.
@@ -97,11 +110,11 @@ ToggleBlockage(NetDeviceContainer gnbNetDev, bool doubleOp, double toggleInterva
 
     if (shouldBlock && !g_blockageActive)
     {
-        // Enter blockage: reduce TxPower dramatically
-        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetTxPower(-100.0);
+        // Enter blockage: reduce TxPower by 60 dB (simulating human/vehicle blockage per 3GPP TR 38.901)
+        NrHelper::GetGnbPhy(gnbNetDev.Get(0), 0)->SetTxPower(g_originalTxPowerBwp0 - 60.0);
         if (doubleOp)
         {
-            NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetTxPower(-100.0);
+            NrHelper::GetGnbPhy(gnbNetDev.Get(0), 1)->SetTxPower(g_originalTxPowerBwp1 - 60.0);
         }
         g_blockageActive = true;
         NS_LOG_INFO(Simulator::Now().GetSeconds() << "s: BLOCKAGE ON (step " << g_blockageStep << ")");
@@ -148,9 +161,12 @@ SampleFlowStats(Ptr<FlowMonitor> monitor,
         double throughputMbps = (dRxBytes * 8.0) / interval / 1e6;
         double meanDelayMs = dRxPackets > 0 ? (dDelaySum / dRxPackets) * 1000.0 : 0.0;
         double meanJitterMs = dRxPackets > 0 ? (dJitterSum / dRxPackets) * 1000.0 : 0.0;
+        double pktLossRate = (dRxPackets + dLost) > 0 ? (double)dLost / (dRxPackets + dLost) : 0.0;
 
         traceFile << now << "," << id << "," << throughputMbps << ","
-                   << meanDelayMs << "," << meanJitterMs << "," << dLost << "\n";
+                   << meanDelayMs << "," << meanJitterMs << "," << dLost
+                   << "," << g_lastSinrDb << "," << g_lastRsrpDbm
+                   << "," << pktLossRate << "\n";
     }
     lastStats = stats;
 
@@ -179,7 +195,7 @@ main(int argc, char* argv[])
 
     // Simulation parameters. Please don't use double to indicate seconds; use
     // ns-3 Time values which use integers to avoid portability issues.
-    Time simTime = MilliSeconds(1000);
+    Time simTime = MilliSeconds(30000);
     Time udpAppStartTime = MilliSeconds(400);
 
     // NR parameters (Reference: 3GPP TR 38.901 V17.0.0 (Release 17)
@@ -640,6 +656,15 @@ main(int argc, char* argv[])
 
     // enable the traces provided by the nr module
     // nrHelper->EnableTraces();
+    // --- PHY traces: SINR and RSRP (ns-3.48 / cttc-nr correct signatures) ---
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/DlDataSinr",
+        MakeCallback(&RecordDlDataSinr));
+
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/ReportRsrp",
+        MakeCallback(&RecordReportRsrp));
+
 
     FlowMonitorHelper flowmonHelper;
     NodeContainer endpointNodes;
@@ -658,7 +683,7 @@ main(int argc, char* argv[])
     double snapshotInterval = 0.1;
     std::map<FlowId, FlowMonitor::FlowStats> lastStats;
     std::ofstream traceFile("kpi_trace_scenario3_thzblockage.csv");
-    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets\n";
+    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets,sinr_db,rsrp_dbm,packet_loss_rate\n";
     Simulator::Schedule(Seconds(snapshotInterval), &SampleFlowStats, monitor, classifier,
                          std::ref(lastStats), std::ref(traceFile), snapshotInterval);
 

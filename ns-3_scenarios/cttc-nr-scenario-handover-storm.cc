@@ -34,8 +34,19 @@ using namespace ns3;
 
 NS_LOG_COMPONENT_DEFINE("CttcNrScenarioHandoverStorm");
 
-// Global handover counter
+// Global handover counter and PHY telemetry
 static uint32_t g_handoverCount = 0;
+static double g_lastSinrDb = 20.0;
+static double g_lastRsrpDbm = -75.0;
+
+void RecordDlDataSinr(uint16_t cellId, uint16_t rnti, double sinr, uint16_t ccId) {
+    g_lastSinrDb = (sinr > 0) ? 10.0 * std::log10(sinr) : -30.0;
+}
+
+void RecordReportRsrp(uint16_t p1, uint16_t p2, uint16_t p3, double rsrp, uint8_t ccId) {
+    g_lastRsrpDbm = (rsrp > 0) ? 10.0 * std::log10(rsrp * 1000.0) : -140.0;
+}
+
 
 /**
  * Callback for HandoverStart trace source.
@@ -98,10 +109,15 @@ SampleFlowStats(Ptr<FlowMonitor> monitor,
         double throughputMbps = (dRxBytes * 8.0) / interval / 1e6;
         double meanDelayMs = dRxPackets > 0 ? (dDelaySum / dRxPackets) * 1000.0 : 0.0;
         double meanJitterMs = dRxPackets > 0 ? (dJitterSum / dRxPackets) * 1000.0 : 0.0;
+        double pktLossRate = (dRxPackets + dLost) > 0 ? (double)dLost / (dRxPackets + dLost) : 0.0;
 
         traceFile << now << "," << id << "," << throughputMbps << ","
-                   << meanDelayMs << "," << meanJitterMs << "," << dLost << "\n";
+                   << meanDelayMs << "," << meanJitterMs << "," << dLost
+                   << "," << g_lastSinrDb << "," << g_lastRsrpDbm
+                   << "," << pktLossRate << "," << g_handoverCount << "\n";
     }
+    // reset handover count after writing to trace for interval-based counting
+    g_handoverCount = 0;
     lastStats = stats;
 
     Simulator::Schedule(Seconds(interval), &SampleFlowStats, monitor, classifier,
@@ -124,7 +140,7 @@ main(int argc, char* argv[])
     uint32_t lambdaBe = 10000;
 
     // Simulation parameters — identical across all 5 scenarios
-    Time simTime = MilliSeconds(1000);
+    Time simTime = MilliSeconds(30000);
     Time udpAppStartTime = MilliSeconds(400);
 
     // NR parameters
@@ -455,42 +471,30 @@ main(int argc, char* argv[])
 
     /*
      * Schedule handover events: ping-pong UE 0 between gNB 0, 1, 2 and back.
-     * We target ~6 handover events across the 1s simulation.
-     * The first UE (lowLat UE 0) is used for handovers.
+     * Loop to generate continuous handovers for the 30s simulation.
      */
-    // HO 1: t=450ms, UE0 from gNB0 -> gNB1
-    Simulator::Schedule(MilliSeconds(440), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(1));
-    nrHelper->HandoverRequest(MilliSeconds(450), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(0), gnbNetDev.Get(1));
+    for (int t = 450; t < 29000; t += 500)
+    {
+        int prevGnbIdx = ((t - 450) / 500) % 3;
+        int gnbIdx = (((t - 450) / 500) + 1) % 3;
 
-    // HO 2: t=550ms, UE0 from gNB1 -> gNB2
-    Simulator::Schedule(MilliSeconds(540), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(2));
-    nrHelper->HandoverRequest(MilliSeconds(550), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(1), gnbNetDev.Get(2));
-
-    // HO 3: t=650ms, UE0 from gNB2 -> gNB0
-    Simulator::Schedule(MilliSeconds(640), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(0));
-    nrHelper->HandoverRequest(MilliSeconds(650), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(2), gnbNetDev.Get(0));
-
-    // HO 4: t=750ms, UE0 from gNB0 -> gNB1
-    Simulator::Schedule(MilliSeconds(740), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(1));
-    nrHelper->HandoverRequest(MilliSeconds(750), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(0), gnbNetDev.Get(1));
-
-    // HO 5: t=850ms, UE0 from gNB1 -> gNB2
-    Simulator::Schedule(MilliSeconds(840), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(2));
-    nrHelper->HandoverRequest(MilliSeconds(850), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(1), gnbNetDev.Get(2));
-
-    // HO 6: t=950ms, UE0 from gNB2 -> gNB0
-    Simulator::Schedule(MilliSeconds(940), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(0));
-    nrHelper->HandoverRequest(MilliSeconds(950), ueLowLatNetDev.Get(0),
-                              gnbNetDev.Get(2), gnbNetDev.Get(0));
+        Simulator::Schedule(MilliSeconds(t - 10), &TeleportUeNearGnb, ueNodes.Get(0), gnbNodes.Get(gnbIdx));
+        nrHelper->HandoverRequest(MilliSeconds(t), ueLowLatNetDev.Get(0),
+                                  gnbNetDev.Get(prevGnbIdx), gnbNetDev.Get(gnbIdx));
+    }
 
     // Connect HandoverStart trace source to count handovers
     Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrGnbNetDevice/NrGnbRrc/HandoverStart",
                     MakeCallback(&NotifyHandoverStartGnb));
+    // --- PHY traces: SINR and RSRP (ns-3.48 / cttc-nr correct signatures) ---
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/DlDataSinr",
+        MakeCallback(&RecordDlDataSinr));
+
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/ReportRsrp",
+        MakeCallback(&RecordReportRsrp));
+
 
     // FlowMonitor setup
     FlowMonitorHelper flowmonHelper;
@@ -510,7 +514,7 @@ main(int argc, char* argv[])
     double snapshotInterval = 0.1;
     std::map<FlowId, FlowMonitor::FlowStats> lastStats;
     std::ofstream traceFile("kpi_trace_scenario1_handoverstorm.csv");
-    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets\n";
+    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets,sinr_db,rsrp_dbm,packet_loss_rate,handover_count\n";
     Simulator::Schedule(Seconds(snapshotInterval), &SampleFlowStats, monitor, classifier,
                          std::ref(lastStats), std::ref(traceFile), snapshotInterval);
 

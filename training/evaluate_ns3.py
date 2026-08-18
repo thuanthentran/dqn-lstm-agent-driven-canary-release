@@ -36,8 +36,8 @@ HEATMAP_DIR = os.path.join(BASE_DIR, "logs", "attention_heatmaps_ns3")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 FEATURE_NAMES = [
     "CPU", "RAM", "Latency", "Error_Rate", "Traffic",
-    "Handover", "SINR", "PRB_Util", "HARQ_NACK", "NTN_Gap",
-    "ISAC", "Deploy_Age",
+    "Handover", "SINR", "RSRP", "PRB_Util", "HARQ_NACK", "NTN_Gap",
+    "ISAC", "Pkt_Loss", "Jitter", "Deploy_Age",
 ]
 NUM_APP_SCENARIOS = 5
 NUM_NET_SCENARIOS = 5

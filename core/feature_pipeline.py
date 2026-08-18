@@ -23,10 +23,13 @@ RAW_KEYS = [
     "rps",
     "handover_count",
     "sinr_db",
+    "rsrp_dbm",
     "prb_util",
     "harq_nack",
     "ntn_gap",
     "isac_contention",
+    "packet_loss_rate",
+    "jitter_ms",
     "time_since_deploy",
 ]
 
@@ -41,10 +44,13 @@ STATE_KEYS = [
     "rps_n",
     "handover_n",
     "sinr_n",
+    "rsrp_n",
     "prb_n",
     "harq_n",
     "ntn_gap_n",
     "isac_n",
+    "pkt_loss_n",
+    "jitter_n",
     "deploy_age_n",
 ]
 
@@ -81,13 +87,20 @@ def normalize_raw_metrics(raw: Dict[str, float]) -> Dict[str, float]:
         "cpu_n": _clip(cpu_ratio / MAX_RATIO, 0.0, 1.0),
         "mem_n": _clip(mem_ratio / MAX_RATIO, 0.0, 1.0),
         "rps_n": _clip(float(raw.get("rps", 0.0)) / RPS_REF, 0.0, 1.0),
-        # --- 6G network channels ---
-        "handover_n":   _clip(raw.get("handover_count", 0) / 5.0, 0.0, 1.0),
-        "sinr_n":       _clip((raw.get("sinr_db", -85.0) + 130.0) / 60.0, 0.0, 1.0),
+        # --- 6G network channels (3GPP TS 28.552 baseline) ---
+        "handover_n":   _clip(raw.get("handover_count", 0) / 10.0, 0.0, 1.0),
+        # SINR: 3GPP NR typical range [-10, +30] dB (Good ≥15, Fair 5-15, Poor <5)
+        "sinr_n":       _clip((raw.get("sinr_db", 15.0) + 10.0) / 40.0, 0.0, 1.0),
+        # RSRP: 3GPP range [-140, -60] dBm
+        "rsrp_n":       _clip((raw.get("rsrp_dbm", -80.0) + 140.0) / 80.0, 0.0, 1.0),
         "prb_n":        _clip(raw.get("prb_util", 0.0), 0.0, 1.0),
+        # HARQ NACK: eMBB BLER target ~10% (1st tx), max 30% for fault
         "harq_n":       _clip(raw.get("harq_nack", 0.0) / 0.3, 0.0, 1.0),
         "ntn_gap_n":    _clip(raw.get("ntn_gap", 0.0), 0.0, 1.0),
         "isac_n":       _clip(raw.get("isac_contention", 0.0), 0.0, 1.0),
+        # Packet loss and jitter from FlowMonitor (already in ns-3 traces)
+        "pkt_loss_n":   _clip(raw.get("packet_loss_rate", 0.0), 0.0, 1.0),
+        "jitter_n":     _clip(raw.get("jitter_ms", 0.0) / 10.0, 0.0, 1.0),
         "deploy_age_n": _clip(raw.get("time_since_deploy", 0.0) / 300.0, 0.0, 1.0),
     }
 

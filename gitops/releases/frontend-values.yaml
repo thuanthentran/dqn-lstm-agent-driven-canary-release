@@ -1,10 +1,36 @@
 serviceName: frontend
 replicas: 1
-image: ghcr.io/thuanthentran/samplemicroservice:latest
-containerPort: 8000
+image: ghcr.io/thuanthentran/frontend:latest
+containerPort: 8080
 portName: http
+serviceType: NodePort
+nodePort: 30080
 env:
-  - name: SERVICE_NAME
-    value: frontend
-  - name: UPSTREAMS
-    value: http://service-a:8000,http://service-b:8000
+  - name: PORT
+    value: "8080"
+  - name: PRODUCT_CATALOG_SERVICE_ADDR
+    value: "productcatalogservice:3550"
+  - name: CURRENCY_SERVICE_ADDR
+    value: "currencyservice:7000"
+  - name: CART_SERVICE_ADDR
+    value: "cartservice:7070"
+  - name: RECOMMENDATION_SERVICE_ADDR
+    value: "recommendationservice:8080"
+  - name: SHIPPING_SERVICE_ADDR
+    value: "shippingservice:50051"
+  - name: CHECKOUT_SERVICE_ADDR
+    value: "checkoutservice:5050"
+  - name: AD_SERVICE_ADDR
+    value: "adservice:9555"
+  - name: SHOPPING_ASSISTANT_SERVICE_ADDR
+    value: "shoppingassistantservice:8080"
+  - name: DISABLE_PROFILER
+    value: "1"
+readinessProbe:
+  initialDelaySeconds: 10
+  httpGet:
+    path: "/_healthz"
+    port: 8080
+    httpHeaders:
+    - name: "Cookie"
+      value: "shop_session-id=x-readiness-probe"

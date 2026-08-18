@@ -8,12 +8,14 @@ image: nginx:latest
 containerPort: 80
 portName: http
 serviceType: ClusterIP
+envNamespace: ""
 
 # nodePort is only used if serviceType is NodePort
 # nodePort: 30080
 
-podAnnotations:
-  linkerd.io/inject: enabled
+# Istio sidecar injection is controlled via the namespace label (istio-injection: enabled).
+# No pod annotation needed.
+podAnnotations: {}
 
 readinessProbe: {}
 #  httpGet:
@@ -24,6 +26,9 @@ readinessProbe: {}
 env: []
 #  - name: EXAMPLE_ENV
 #    value: "example"
+
+# Set to true only for loadgenerator (deploys as Deployment, not Rollout)
+isLoadGenerator: false
 
 extraVolumes: []
 extraVolumeMounts: []

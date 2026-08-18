@@ -4,6 +4,5 @@ metadata:
   name: argo-rollouts-config
   namespace: argo-rollouts
 data:
-  trafficRouterPlugins: |-
-    - name: "argoproj-labs/gatewayAPI"
-      location: "file:///plugins/gatewayapi-plugin-linux-amd64"
+  # Istio traffic routing is built-in to Argo Rollouts — no plugin required.
+  # trafficRouterPlugins is intentionally empty.

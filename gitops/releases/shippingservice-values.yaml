@@ -1,0 +1,14 @@
+serviceName: shippingservice
+replicas: 1
+image: ghcr.io/thuanthentran/shippingservice:latest
+containerPort: 50051
+portName: grpc
+env:
+  - name: PORT
+    value: "50051"
+  - name: DISABLE_PROFILER
+    value: "1"
+readinessProbe:
+  initialDelaySeconds: 20
+  exec:
+    command: ["/bin/grpc_health_probe", "-addr=:50051"]

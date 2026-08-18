@@ -1,4 +1,4 @@
-{{- if eq .Values.envNamespace "twin" }}
+{{- if and (eq .Values.envNamespace "twin") (not .Values.isLoadGenerator) }}
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -19,6 +19,6 @@ spec:
               - name: load-tester
                 image: williamyeh/hey
                 # Run load test directly using /hey binary in the container
-                command: ["/hey", "-z", "2m", "-c", "50", "http://frontend.{{ .Values.envNamespace }}.svc.cluster.local:8000/"]
+                command: ["/hey", "-z", "2m", "-c", "50", "http://frontend.{{ .Values.envNamespace }}.svc.cluster.local:8080/"]
               restartPolicy: Never
 {{- end }}

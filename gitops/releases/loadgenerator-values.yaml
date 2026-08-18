@@ -1,0 +1,11 @@
+serviceName: loadgenerator
+replicas: 1
+image: ghcr.io/thuanthentran/loadgenerator:latest
+isLoadGenerator: true
+containerPort: 0
+portName: none
+env:
+  - name: FRONTEND_ADDR
+    value: "frontend:8080"
+  - name: USERS
+    value: "10"

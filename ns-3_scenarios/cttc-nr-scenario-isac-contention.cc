@@ -77,6 +77,19 @@ NS_LOG_COMPONENT_DEFINE("CttcNrScenarioIsacContention");
 // Maximum number of "main" flows to log (lowLat + voice = 2 per UE pair)
 static const FlowId g_maxLogFlowId = 2;
 
+// Global PHY-layer telemetry
+static double g_lastSinrDb = 20.0;
+static double g_lastRsrpDbm = -75.0;
+
+void RecordDlDataSinr(uint16_t cellId, uint16_t rnti, double sinr, uint16_t ccId) {
+    g_lastSinrDb = (sinr > 0) ? 10.0 * std::log10(sinr) : -30.0;
+}
+
+void RecordReportRsrp(uint16_t p1, uint16_t p2, uint16_t p3, double rsrp, uint8_t ccId) {
+    g_lastRsrpDbm = (rsrp > 0) ? 10.0 * std::log10(rsrp * 1000.0) : -140.0;
+}
+
+
 /**
  * Adjust interference traffic interval sinusoidally.
  * Formula: factor = 0.3 + 0.3*sin(t*0.5)^2
@@ -90,7 +103,8 @@ AdjustInterferenceTraffic(Ptr<Application> app, double baseLambda, double adjust
 {
     double t = Simulator::Now().GetSeconds();
     double sinVal = std::sin(t * 0.5);
-    double factor = 0.3 + 0.3 * sinVal * sinVal;
+    // Reduced interference factor to avoid overloading scheduler (max ~0.3 vs original 0.6)
+    double factor = std::max(0.05, 0.15 + 0.15 * sinVal * sinVal);
     double interval = 1.0 / (baseLambda * factor);
     app->SetAttribute("Interval", TimeValue(Seconds(interval)));
 
@@ -124,6 +138,7 @@ SampleFlowStats(Ptr<FlowMonitor> monitor,
         double throughputMbps = (dRxBytes * 8.0) / interval / 1e6;
         double meanDelayMs = dRxPackets > 0 ? (dDelaySum / dRxPackets) * 1000.0 : 0.0;
         double meanJitterMs = dRxPackets > 0 ? (dJitterSum / dRxPackets) * 1000.0 : 0.0;
+        double pktLossRate = (dRxPackets + dLost) > 0 ? (double)dLost / (dRxPackets + dLost) : 0.0;
 
         // Only log the first g_maxLogFlowId flows (skip interference flow)
         if (id > g_maxLogFlowId)
@@ -132,7 +147,9 @@ SampleFlowStats(Ptr<FlowMonitor> monitor,
         }
 
         traceFile << now << "," << id << "," << throughputMbps << ","
-                   << meanDelayMs << "," << meanJitterMs << "," << dLost << "\n";
+                   << meanDelayMs << "," << meanJitterMs << "," << dLost
+                   << "," << g_lastSinrDb << "," << g_lastRsrpDbm
+                   << "," << pktLossRate << "\n";
     }
     lastStats = stats;
 
@@ -161,7 +178,7 @@ main(int argc, char* argv[])
 
     // Simulation parameters. Please don't use double to indicate seconds; use
     // ns-3 Time values which use integers to avoid portability issues.
-    Time simTime = MilliSeconds(1000);
+    Time simTime = MilliSeconds(30000);
     Time udpAppStartTime = MilliSeconds(400);
 
     // NR parameters (Reference: 3GPP TR 38.901 V17.0.0 (Release 17)
@@ -681,6 +698,15 @@ main(int argc, char* argv[])
 
     // enable the traces provided by the nr module
     // nrHelper->EnableTraces();
+    // --- PHY traces: SINR and RSRP (ns-3.48 / cttc-nr correct signatures) ---
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/DlDataSinr",
+        MakeCallback(&RecordDlDataSinr));
+
+    Config::ConnectWithoutContext(
+        "/NodeList/*/DeviceList/*/$ns3::NrUeNetDevice/ComponentCarrierMapUe/*/NrUePhy/ReportRsrp",
+        MakeCallback(&RecordReportRsrp));
+
 
     FlowMonitorHelper flowmonHelper;
     NodeContainer endpointNodes;
@@ -699,7 +725,7 @@ main(int argc, char* argv[])
     double snapshotInterval = 0.1;
     std::map<FlowId, FlowMonitor::FlowStats> lastStats;
     std::ofstream traceFile("kpi_trace_scenario4_isaccontention.csv");
-    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets\n";
+    traceFile << "time,flowId,throughput_mbps,delay_ms,jitter_ms,lost_packets,sinr_db,rsrp_dbm,packet_loss_rate\n";
     Simulator::Schedule(Seconds(snapshotInterval), &SampleFlowStats, monitor, classifier,
                          std::ref(lastStats), std::ref(traceFile), snapshotInterval);
 

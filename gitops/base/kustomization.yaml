@@ -3,15 +3,16 @@ kind: Kustomization
 
 resources:
   - crds/crd-servicemonitors.yaml
-  - crds/trafficsplit-crd.yaml
+  - namespaces/prod-namespace.yaml
+  - namespaces/twin-namespace.yaml
   - agent/agent-crd.yaml
   - agent/agent-operator.yaml
   - agent/agent-instance.yaml
   - agent/agent-rbac.yaml
   - agent/agent-nodeport-svc.yaml
-  - agent/linkerd-prom-policy.yaml
   - argo-rollouts/argo-rollouts-namespace.yaml
   - argo-rollouts/argo-rollouts-install.yaml
   - argo-rollouts/argo-rollouts-config.yaml
   - argo-rollouts/argo-rollouts-rbac.yaml
+  - redis-cart/redis-cart.yaml
   - sync-controller/sync-controller.yaml

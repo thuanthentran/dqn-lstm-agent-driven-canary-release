@@ -1,0 +1,196 @@
+# Walkthrough: Google Microservices Demo + Istio Refactor
+
+## Tổng kết thay đổi
+
+Toàn bộ **30 file** đã được tạo, sửa, hoặc xóa trải qua 4 phases.
+
+---
+
+## Phase 0 — GitHub CI Workflows ✅
+
+### Thay đổi
+| File | Loại | Mô tả |
+|---|---|---|
+| [`.github/workflows/build.yaml`](file:///c:/Users/ASUS/Desktop/rl/.github/workflows/build.yaml) | MODIFY | Matrix build cho 12 microservices với `dorny/paths-filter`, auto-update image SHA vào GitOps values, tag = `${{ github.sha }}` |
+| [`.github/workflows/build-agent.yaml`](file:///c:/Users/ASUS/Desktop/rl/.github/workflows/build-agent.yaml) | NEW | Tách riêng agent build workflow |
+
+**Cơ chế hoạt động:**
+1. Dev push code vào `services/src/<service>/` → workflow detect service đó changed
+2. Build & push `ghcr.io/thuanthentran/<service>:<sha>` + `:latest`
+3. Auto-update `gitops/releases/<service>-values.yaml` với SHA mới → commit lại repo
+4. ArgoCD phát hiện thay đổi → sync tự động
+
+---
+
+## Phase 1 — Base Layer: Linkerd → Istio ✅
+
+### Thay đổi
+| File | Loại | Mô tả |
+|---|---|---|
+| `gitops/base/crds/trafficsplit-crd.yaml` | DELETE | SMI TrafficSplit CRD không còn cần |
+| `gitops/base/agent/linkerd-prom-policy.yaml` | DELETE | Linkerd Server/ServerAuthorization policy |
+| [`gitops/base/kustomization.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/kustomization.yaml) | MODIFY | Xóa 2 Linkerd refs, thêm namespace manifests + redis-cart |
+| [`gitops/base/namespaces/prod-namespace.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/namespaces/prod-namespace.yaml) | NEW | Namespace `prod` với label `istio-injection: enabled` |
+| [`gitops/base/namespaces/twin-namespace.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/namespaces/twin-namespace.yaml) | NEW | Namespace `twin` với label `istio-injection: enabled` |
+| [`gitops/base/argo-rollouts/argo-rollouts-config.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/argo-rollouts/argo-rollouts-config.yaml) | MODIFY | Xóa `gatewayAPI` plugin — Istio là built-in |
+| [`gitops/base/argo-rollouts/argo-rollouts-rbac.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/argo-rollouts/argo-rollouts-rbac.yaml) | MODIFY | `gateway.networking.k8s.io/httproutes` → `networking.istio.io/virtualservices,destinationrules` |
+| [`gitops/base/redis-cart/redis-cart.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/base/redis-cart/redis-cart.yaml) | MODIFY | Xóa `namespace: default` hardcode |
+
+---
+
+## Phase 2 — Universal Canary Chart: SMI → Istio ✅
+
+### Thay đổi
+| File | Loại | Mô tả |
+|---|---|---|
+| [`gitops/charts/universal-canary/values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/values.yaml) | MODIFY | Xóa Linkerd annotation, thêm `isLoadGenerator: false`, `envNamespace: ""` |
+| [`gitops/charts/universal-canary/templates/rollout.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/templates/rollout.yaml) | MODIFY | `trafficRouting.smi` → `trafficRouting.istio` (VirtualService + DestinationRule) |
+| [`gitops/charts/universal-canary/templates/istio-traffic.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/templates/istio-traffic.yaml) | NEW | VirtualService + DestinationRule template (stable=100%, canary=0% mặc định) |
+| [`gitops/charts/universal-canary/templates/deployment.yaml`](file:///c:/Users/ASUS/Desktop\rl/gitops/charts/universal-canary/templates/deployment.yaml) | NEW | Simple Deployment cho `loadgenerator` (không có canary Rollout) |
+| [`gitops/charts/universal-canary/templates/services.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/templates/services.yaml) | MODIFY | Wrap trong `{{- if not .Values.isLoadGenerator }}` |
+| [`gitops/charts/universal-canary/templates/analysis-template.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/templates/analysis-template.yaml) | MODIFY | Wrap trong `{{- if not .Values.isLoadGenerator }}` |
+| [`gitops/charts/universal-canary/templates/loadtest-template.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/universal-canary/templates/loadtest-template.yaml) | MODIFY | Fix port 8000 → 8080 (frontend port), guard for isLoadGenerator |
+
+---
+
+## Phase 3 — K8s Values Files cho 12 Microservices ✅
+
+Tất cả trong `gitops/releases/`:
+
+| Service | Port | Protocol | Image |
+|---|---|---|---|
+| [`adservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/adservice-values.yaml) | 9555 | grpc | `ghcr.io/thuanthentran/adservice:latest` |
+| [`cartservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/cartservice-values.yaml) | 7070 | grpc | `ghcr.io/thuanthentran/cartservice:latest` |
+| [`checkoutservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/checkoutservice-values.yaml) | 5050 | grpc | `ghcr.io/thuanthentran/checkoutservice:latest` |
+| [`currencyservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/currencyservice-values.yaml) | 7000 | grpc | `ghcr.io/thuanthentran/currencyservice:latest` |
+| [`emailservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/emailservice-values.yaml) | 8080 | grpc | `ghcr.io/thuanthentran/emailservice:latest` |
+| [`frontend-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/frontend-values.yaml) | 8080 | http/NodePort:30080 | `ghcr.io/thuanthentran/frontend:latest` |
+| [`loadgenerator-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/loadgenerator-values.yaml) | — | — (Deployment) | `ghcr.io/thuanthentran/loadgenerator:latest` |
+| [`paymentservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/paymentservice-values.yaml) | 50051 | grpc | `ghcr.io/thuanthentran/paymentservice:latest` |
+| [`productcatalogservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/productcatalogservice-values.yaml) | 3550 | grpc | `ghcr.io/thuanthentran/productcatalogservice:latest` |
+| [`recommendationservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/recommendationservice-values.yaml) | 8080 | grpc | `ghcr.io/thuanthentran/recommendationservice:latest` |
+| [`shippingservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/shippingservice-values.yaml) | 50051 | grpc | `ghcr.io/thuanthentran/shippingservice:latest` |
+| [`shoppingassistantservice-values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/releases/shoppingassistantservice-values.yaml) | 8080 | grpc | `ghcr.io/thuanthentran/shoppingassistantservice:latest` |
+
+---
+
+## Phase 4 — Bootstrap Chart ✅
+
+| File | Loại | Mô tả |
+|---|---|---|
+| [`gitops/charts/bootstrap/values.yaml`](file:///c:/Users/ASUS/Desktop/rl/gitops/charts/bootstrap/values.yaml) | MODIFY | 4 sample services → 12 Google microservices |
+
+---
+
+## Phase 5 — ArgoCD Sync Guide
+
+> [!IMPORTANT]
+> **Thực hiện theo đúng thứ tự sau.** Istio PHẢI được cài trước khi sync ArgoCD để sidecar injection hoạt động.
+
+### Bước 1: Cài Istio vào cluster
+
+```bash
+# Tải istioctl (version mới nhất)
+curl -L https://istio.io/downloadIstio | sh -
+cd istio-*
+export PATH=$PWD/bin:$PATH
+
+# Cài profile default (bao gồm ingress gateway)
+istioctl install --set profile=default -y
+
+# Verify Istio pods running
+kubectl get pods -n istio-system
+```
+
+### Bước 2: Uninstall Linkerd (nếu đang running)
+
+```bash
+# Kiểm tra Linkerd có đang chạy không
+kubectl get ns | grep linkerd
+
+# Nếu có, uninstall
+linkerd uninstall | kubectl delete -f -
+# Hoặc
+kubectl delete ns linkerd linkerd-viz linkerd-multicluster 2>/dev/null || true
+```
+
+### Bước 3: Commit và push tất cả thay đổi lên GitHub
+
+```bash
+cd c:\Users\ASUS\Desktop\rl
+git add .
+git status   # Review lại những gì sẽ được commit
+git commit -m "feat: migrate to google microservices-demo + istio service mesh"
+git push origin main
+```
+
+### Bước 4: Trigger ArgoCD Sync
+
+```bash
+# Sync cluster-base trước (tạo namespaces + label Istio injection)
+argocd app sync cluster-base --timeout 180
+
+# Sync bootstrap để đăng ký 12 Application objects
+argocd app sync bootstrap-prod --timeout 120
+argocd app sync bootstrap-twin --timeout 120
+
+# Liệt kê tất cả ArgoCD apps
+argocd app list
+```
+
+### Bước 5: Verify toàn bộ stack
+
+```bash
+# 1. Kiểm tra namespaces có Istio label
+kubectl get namespace prod twin -L istio-injection
+
+# 2. Kiểm tra pods (mỗi pod phải có 2/2 containers: app + istio-proxy)
+kubectl get pods -n prod
+kubectl get pods -n twin
+
+# 3. Kiểm tra VirtualServices và DestinationRules đã được tạo
+kubectl get virtualservice,destinationrule -n prod
+
+# 4. Kiểm tra Rollout status
+kubectl argo rollouts list rollouts -n prod
+
+# 5. Truy cập Online Boutique qua NodePort
+# Lấy IP của node:
+kubectl get nodes -o wide
+# Frontend NodePort là 30080:
+curl http://<NODE_IP>:30080
+```
+
+### Bước 6: Build images lần đầu (manual trigger)
+
+Vì images `ghcr.io/thuanthentran/<service>:latest` chưa tồn tại, cần trigger CI thủ công:
+
+```bash
+# Trigger build tất cả services qua GitHub UI:
+# GitHub → Actions → "Build and Push Microservices" → Run workflow
+# Hoặc dùng gh CLI:
+gh workflow run build.yaml --field service=frontend
+gh workflow run build.yaml --field service=cartservice
+# ... (lặp cho từng service)
+```
+
+> [!TIP]
+> Hoặc force push một empty commit để trigger tất cả:
+> ```bash
+> git commit --allow-empty -m "ci: trigger all builds"
+> # Sau đó edit 1 file trong mỗi services/src/<service>/ để trigger từng service
+> ```
+
+---
+
+## Kiến trúc sau refactor
+
+```
+GitHub Push → CI detects changed service → Build image:sha → Update values.yaml → Push
+                                                                          ↓
+ArgoCD detects values.yaml change → Sync App → Argo Rollouts starts canary
+                                                          ↓
+                              Istio VirtualService (100% stable → gradually shift to canary)
+                                                          ↓
+                              RL Agent analyzes metrics → Promote or Rollback
+```

@@ -2,49 +2,162 @@ name: Build and Push Microservices
 
 on:
   push:
-    branches: [ "linkerd" ]
+    branches: ["main"]
     paths:
-      - 'services/src/samplemicroservice/**'
-      - 'services/agent/**'
+      - 'services/src/adservice/**'
+      - 'services/src/cartservice/**'
+      - 'services/src/checkoutservice/**'
+      - 'services/src/currencyservice/**'
+      - 'services/src/emailservice/**'
+      - 'services/src/frontend/**'
+      - 'services/src/loadgenerator/**'
+      - 'services/src/paymentservice/**'
+      - 'services/src/productcatalogservice/**'
+      - 'services/src/recommendationservice/**'
+      - 'services/src/shippingservice/**'
+      - 'services/src/shoppingassistantservice/**'
   workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to build (leave empty to auto-detect)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - adservice
+          - cartservice
+          - checkoutservice
+          - currencyservice
+          - emailservice
+          - frontend
+          - loadgenerator
+          - paymentservice
+          - productcatalogservice
+          - recommendationservice
+          - shippingservice
+          - shoppingassistantservice
 
 permissions:
-  contents: read
-  packages: write 
+  contents: write   # needed to commit values file updates
+  packages: write   # needed to push to GHCR
 
 jobs:
-  build:
+  # ─────────────────────────────────────────────────────────────
+  # Job 1: Detect which services changed
+  # ─────────────────────────────────────────────────────────────
+  detect-changes:
+    name: Detect Changed Services
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
-      - name: Login to GitHub Container Registry 
-        uses: docker/login-action@v2
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            adservice:
+              - 'services/src/adservice/**'
+            cartservice:
+              - 'services/src/cartservice/**'
+            checkoutservice:
+              - 'services/src/checkoutservice/**'
+            currencyservice:
+              - 'services/src/currencyservice/**'
+            emailservice:
+              - 'services/src/emailservice/**'
+            frontend:
+              - 'services/src/frontend/**'
+            loadgenerator:
+              - 'services/src/loadgenerator/**'
+            paymentservice:
+              - 'services/src/paymentservice/**'
+            productcatalogservice:
+              - 'services/src/productcatalogservice/**'
+            recommendationservice:
+              - 'services/src/recommendationservice/**'
+            shippingservice:
+              - 'services/src/shippingservice/**'
+            shoppingassistantservice:
+              - 'services/src/shoppingassistantservice/**'
+
+      - name: Build matrix from changed services
+        id: set-matrix
+        run: |
+          # If manual dispatch with specific service, use that
+          if [[ -n "${{ github.event.inputs.service }}" ]]; then
+            echo "matrix=[\"${{ github.event.inputs.service }}\"]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # Otherwise, build matrix from detected changes
+          CHANGES='${{ steps.filter.outputs.changes }}'
+          echo "matrix=${CHANGES}" >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 2: Build & push each changed service image
+  # ─────────────────────────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.service }}
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.matrix != '[]' && needs.detect-changes.outputs.matrix != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare Image Names
-        id: prep
+      - name: Prepare image metadata
+        id: meta
         run: |
-          IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/samplemicroservice
-          echo "image_name=${IMAGE_NAME,,}" >> $GITHUB_OUTPUT
-          AGENT_IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/agent
-          echo "agent_image_name=${AGENT_IMAGE_NAME,,}" >> $GITHUB_OUTPUT
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}"
+          echo "image=${IMAGE,,}" >> $GITHUB_OUTPUT
 
-      - name: Build and push samplemicroservice
-        uses: docker/build-push-action@v4
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
         with:
-          context: ./services/src/samplemicroservice
-          file: ./services/src/samplemicroservice/Dockerfile
+          context: ./services/src/${{ matrix.service }}
+          file: ./services/src/${{ matrix.service }}/Dockerfile
           push: true
-          tags: ${{ steps.prep.outputs.image_name }}:latest
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-      - name: Build and push agent
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ./services/agent/Dockerfile
-          push: true
-          tags: ${{ steps.prep.outputs.agent_image_name }}:latest
+      - name: Update GitOps values with new image SHA
+        run: |
+          VALUES_FILE="gitops/releases/${{ matrix.service }}-values.yaml"
+          if [[ -f "${VALUES_FILE}" ]]; then
+            sed -i "s|^image:.*|image: ${{ steps.meta.outputs.image }}:${{ github.sha }}|" "${VALUES_FILE}"
+            echo "Updated ${VALUES_FILE}"
+          else
+            echo "WARNING: ${VALUES_FILE} not found, skipping update"
+          fi
+
+      - name: Commit and push GitOps values update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gitops/releases/${{ matrix.service }}-values.yaml
+          if git diff --cached --quiet; then
+            echo "No changes to commit for ${{ matrix.service }}"
+          else
+            git commit -m "ci(gitops): update ${{ matrix.service }} image -> ${{ github.sha }}"
+            git push
+          fi

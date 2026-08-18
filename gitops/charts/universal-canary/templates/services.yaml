@@ -1,3 +1,4 @@
+{{- if not .Values.isLoadGenerator }}
 # =========================================================
 # 1. MAIN SERVICE: Dành cho giao tiếp East-West thông thường
 # Các microservices khác sẽ gọi đến tên này qua DNS của K8s.
@@ -62,3 +63,4 @@ spec:
   - port: {{ .Values.containerPort }}
     targetPort: {{ .Values.containerPort }}
     name: {{ .Values.portName | default "grpc" }}
+{{- end }}

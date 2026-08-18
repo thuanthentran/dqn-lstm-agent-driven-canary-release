@@ -23,10 +23,10 @@ MAX_STEPS_PER_EPISODE = 50
 class CanaryEnv(gym.Env):
     """Gym-like Canary rollout environment that exposes a (T, C) matrix.
 
-    Observation: shape (SEQ_LEN, 12) with channels:
+    Observation: shape (SEQ_LEN, 15) with channels:
         [cpu_n, mem_n, l_ratio_n, e_ratio_n, weight_n,
-         handover_n, sinr_n, prb_n, harq_n, ntn_gap_n,
-         isac_n, deploy_age_n]
+         handover_n, sinr_n, rsrp_n, prb_n, harq_n, ntn_gap_n,
+         isac_n, pkt_loss_n, jitter_n, deploy_age_n]
     Action: Discrete(3): 0=Hold, 1=Promote, 2=Rollback
     """
 
@@ -34,11 +34,11 @@ class CanaryEnv(gym.Env):
         super().__init__()
         self.seq_len = int(seq_len)
 
-        # --- Dynamic channel list (12 features) ---
+        # --- Dynamic channel list (15 features, 3GPP TS 28.552 aligned) ---
         self.channel_keys = [
             "cpu_n", "mem_n", "l_ratio_n", "e_ratio_n", "weight_n",
-            "handover_n", "sinr_n", "prb_n", "harq_n", "ntn_gap_n",
-            "isac_n", "deploy_age_n",
+            "handover_n", "sinr_n", "rsrp_n", "prb_n", "harq_n", "ntn_gap_n",
+            "isac_n", "pkt_loss_n", "jitter_n", "deploy_age_n",
         ]
         self.num_features = len(self.channel_keys)
 
@@ -121,26 +121,35 @@ class CanaryEnv(gym.Env):
         sc = getattr(self, "network_scenario", 0)
         t = self.step_count
 
+        # --- 3GPP-calibrated SINR baseline values ---
+        # Ref: Koutlia et al., "Calibration of 5G-LENA", 3GPP TR 38.901
+        # SINR range: [-10, +30] dB; RSRP range: [-140, -60] dBm
         if sc == 0:  # Stable
             burst = 1.0
             network_raw = {
                 "handover_count": 0,
-                "sinr_db": -85.0 + np.random.normal(0, 1.0),
-                "prb_util": 0.4,
-                "harq_nack": 0.02,
+                "sinr_db": 20.0 + np.random.normal(0, 2.0),
+                "rsrp_dbm": -75.0 + np.random.normal(0, 2.0),
+                "prb_util": 0.4 + np.random.normal(0, 0.03),
+                "harq_nack": 0.05 + abs(np.random.normal(0, 0.01)),
                 "ntn_gap": 0,
                 "isac_contention": 0.0,
+                "packet_loss_rate": max(0.0, np.random.normal(0.001, 0.001)),
+                "jitter_ms": max(0.0, 0.05 + np.random.normal(0, 0.02)),
             }
 
         elif sc == 1:  # HandoverStorm
             burst = 1.0 + 0.4 * math.sin(t) ** 2
             network_raw = {
-                "handover_count": random.randint(2, 5),
-                "sinr_db": -95.0 + np.random.normal(0, 5.0),
-                "prb_util": 0.6,
-                "harq_nack": 0.06,
+                "handover_count": random.randint(2, 8),
+                "sinr_db": 5.0 + np.random.normal(0, 4.0),
+                "rsrp_dbm": -95.0 + np.random.normal(0, 5.0),
+                "prb_util": 0.6 + np.random.normal(0, 0.05),
+                "harq_nack": 0.08 + abs(np.random.normal(0, 0.02)),
                 "ntn_gap": 0,
                 "isac_contention": 0.0,
+                "packet_loss_rate": max(0.0, np.random.normal(0.02, 0.01)),
+                "jitter_ms": max(0.0, 0.5 + np.random.normal(0, 0.2)),
             }
 
         elif sc == 2:  # NTNGap
@@ -149,21 +158,27 @@ class CanaryEnv(gym.Env):
                 burst = 2.5
                 network_raw = {
                     "handover_count": 0,
-                    "sinr_db": -110.0 + np.random.normal(0, 2.0),
-                    "prb_util": 0.4,
-                    "harq_nack": 0.15,
+                    "sinr_db": -5.0 + np.random.normal(0, 3.0),
+                    "rsrp_dbm": -115.0 + np.random.normal(0, 3.0),
+                    "prb_util": 0.3 + np.random.normal(0, 0.05),
+                    "harq_nack": 0.15 + abs(np.random.normal(0, 0.03)),
                     "ntn_gap": 1,
                     "isac_contention": 0.0,
+                    "packet_loss_rate": max(0.0, np.random.normal(0.1, 0.03)),
+                    "jitter_ms": max(0.0, 5.0 + np.random.normal(0, 1.0)),
                 }
             else:
                 burst = 1.0
                 network_raw = {
                     "handover_count": 0,
-                    "sinr_db": -85.0 + np.random.normal(0, 1.0),
-                    "prb_util": 0.4,
-                    "harq_nack": 0.02,
+                    "sinr_db": 12.0 + np.random.normal(0, 2.0),
+                    "rsrp_dbm": -90.0 + np.random.normal(0, 2.0),
+                    "prb_util": 0.4 + np.random.normal(0, 0.03),
+                    "harq_nack": 0.05 + abs(np.random.normal(0, 0.01)),
                     "ntn_gap": 0,
                     "isac_contention": 0.0,
+                    "packet_loss_rate": max(0.0, np.random.normal(0.005, 0.002)),
+                    "jitter_ms": max(0.0, 0.3 + np.random.normal(0, 0.1)),
                 }
 
         elif sc == 3:  # THzBlockage
@@ -172,21 +187,27 @@ class CanaryEnv(gym.Env):
                 burst = 3.0
                 network_raw = {
                     "handover_count": 0,
-                    "sinr_db": -120.0 + np.random.normal(0, 2.0),
-                    "prb_util": 0.4,
-                    "harq_nack": 0.2,
+                    "sinr_db": -2.0 + np.random.normal(0, 3.0),
+                    "rsrp_dbm": -120.0 + np.random.normal(0, 3.0),
+                    "prb_util": 0.2 + np.random.normal(0, 0.05),
+                    "harq_nack": 0.20 + abs(np.random.normal(0, 0.03)),
                     "ntn_gap": 0,
                     "isac_contention": 0.0,
+                    "packet_loss_rate": max(0.0, np.random.normal(0.15, 0.05)),
+                    "jitter_ms": max(0.0, 3.0 + np.random.normal(0, 1.0)),
                 }
             else:
                 burst = 1.0
                 network_raw = {
                     "handover_count": 0,
-                    "sinr_db": -85.0 + np.random.normal(0, 1.0),
-                    "prb_util": 0.4,
-                    "harq_nack": 0.02,
+                    "sinr_db": 22.0 + np.random.normal(0, 2.0),
+                    "rsrp_dbm": -72.0 + np.random.normal(0, 2.0),
+                    "prb_util": 0.4 + np.random.normal(0, 0.03),
+                    "harq_nack": 0.05 + abs(np.random.normal(0, 0.01)),
                     "ntn_gap": 0,
                     "isac_contention": 0.0,
+                    "packet_loss_rate": max(0.0, np.random.normal(0.001, 0.001)),
+                    "jitter_ms": max(0.0, 0.04 + np.random.normal(0, 0.01)),
                 }
 
         elif sc == 4:  # ISACContention
@@ -194,22 +215,28 @@ class CanaryEnv(gym.Env):
             burst = 1.0 + contention
             network_raw = {
                 "handover_count": 0,
-                "sinr_db": -85.0 + np.random.normal(0, 1.0),
-                "prb_util": 0.4,
-                "harq_nack": 0.02,
+                "sinr_db": 15.0 + np.random.normal(0, 3.0),
+                "rsrp_dbm": -80.0 + np.random.normal(0, 2.0),
+                "prb_util": 0.5 + contention * 0.3 + np.random.normal(0, 0.03),
+                "harq_nack": 0.05 + contention * 0.05 + abs(np.random.normal(0, 0.01)),
                 "ntn_gap": 0,
                 "isac_contention": contention,
+                "packet_loss_rate": max(0.0, contention * 0.05 + np.random.normal(0, 0.01)),
+                "jitter_ms": max(0.0, 0.2 + contention * 0.5 + np.random.normal(0, 0.1)),
             }
 
         else:  # fallback — Stable
             burst = 1.0
             network_raw = {
                 "handover_count": 0,
-                "sinr_db": -85.0,
+                "sinr_db": 20.0,
+                "rsrp_dbm": -75.0,
                 "prb_util": 0.4,
-                "harq_nack": 0.02,
+                "harq_nack": 0.05,
                 "ntn_gap": 0,
                 "isac_contention": 0.0,
+                "packet_loss_rate": 0.001,
+                "jitter_ms": 0.05,
             }
 
         return burst, network_raw

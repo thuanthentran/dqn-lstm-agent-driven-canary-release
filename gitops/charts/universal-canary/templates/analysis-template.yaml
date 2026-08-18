@@ -1,3 +1,4 @@
+{{- if not .Values.isLoadGenerator }}
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
 metadata:
@@ -33,3 +34,4 @@ spec:
     successCondition: result.action == 1 
     # Thất bại (Rollback) khi API trả về action = 2 (Abort)
     failureCondition: result.action == 2
+{{- end }}

@@ -1,7 +1,7 @@
 """Unit tests for 6G network noise refactor.
 
 Validates:
-1. Observation shape (30, 12)
+1. Observation shape (30, 15)
 2. Network noise is symmetric (does NOT leak as app-fault signal)
 3. App-layer scenarios still produce expected divergence
 4. Training pipeline smoke test (shape/runtime)
@@ -30,13 +30,13 @@ class TestObsShape:
     def test_reset_shape(self):
         env = CanaryEnv()
         obs, _ = env.reset()
-        assert obs.shape == (30, 12), f"Expected (30, 12), got {obs.shape}"
+        assert obs.shape == (30, 15), f"Expected (30, 15), got {obs.shape}"
 
     def test_step_shape(self):
         env = CanaryEnv()
         env.reset()
         obs, _, _, _, _ = env.step(0)
-        assert obs.shape == (30, 12), f"Expected (30, 12), got {obs.shape}"
+        assert obs.shape == (30, 15), f"Expected (30, 15), got {obs.shape}"
 
     def test_obs_range(self):
         """All normalized values should be in [0, 1]."""
@@ -225,7 +225,7 @@ class TestTrainingPipelineSmoke:
         # fa shape: (B, n_heads_feature, T, n_features) = (B, 4, 30, 12)
         assert fa.shape[1] == 4, f"Expected n_heads_feature=4, got {fa.shape[1]}"
         assert fa.shape[2] == 30, f"Expected T=30, got {fa.shape[2]}"
-        assert fa.shape[3] == 12, f"Expected n_features=12, got {fa.shape[3]}"
+        assert fa.shape[3] == 15, f"Expected n_features=15, got {fa.shape[3]}"
 
         ta = attn_maps["temporal_attention"]
         assert ta is not None, "temporal_attention is None after training"

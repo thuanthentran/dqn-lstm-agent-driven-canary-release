@@ -1,0 +1,15 @@
+serviceName: adservice
+replicas: 1
+image: ghcr.io/thuanthentran/adservice:latest
+containerPort: 9555
+portName: grpc
+env:
+  - name: PORT
+    value: "9555"
+  - name: DISABLE_PROFILER
+    value: "1"
+readinessProbe:
+  initialDelaySeconds: 20
+  periodSeconds: 15
+  exec:
+    command: ["/bin/grpc_health_probe", "-addr=:9555"]

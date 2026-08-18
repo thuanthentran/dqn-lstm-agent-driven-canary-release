@@ -164,7 +164,7 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
         n_heads_feature: int = 1,
         n_layers: int = 2,
         seq_len: int = 30,
-        n_features: int = 5,
+        n_features: int = 15,
         dropout: float = 0.1,
     ):
         super().__init__(observation_space, features_dim=d_model)
