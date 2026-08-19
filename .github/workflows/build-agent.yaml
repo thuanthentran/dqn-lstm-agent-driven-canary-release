@@ -5,6 +5,7 @@ on:
     branches: ["istio"]
     paths:
       - 'services/agent/**'
+      - 'models/**'
   workflow_dispatch:
 
 permissions:

@@ -24,6 +24,7 @@ on:
         type: choice
         options:
           - ''
+          - all
           - adservice
           - cartservice
           - checkoutservice
@@ -89,7 +90,10 @@ jobs:
         id: set-matrix
         run: |
           # If manual dispatch with specific service, use that
-          if [[ -n "${{ github.event.inputs.service }}" ]]; then
+          if [[ "${{ github.event.inputs.service }}" == "all" ]]; then
+            echo 'matrix=["adservice", "cartservice", "checkoutservice", "currencyservice", "emailservice", "frontend", "loadgenerator", "paymentservice", "productcatalogservice", "recommendationservice", "shippingservice", "shoppingassistantservice"]' >> $GITHUB_OUTPUT
+            exit 0
+          elif [[ -n "${{ github.event.inputs.service }}" ]]; then
             echo "matrix=[\"${{ github.event.inputs.service }}\"]" >> $GITHUB_OUTPUT
             exit 0
           fi
