@@ -14,4 +14,4 @@ resources:
   - argo-rollouts/argo-rollouts-config.yaml
   - argo-rollouts/argo-rollouts-rbac.yaml
   - redis-cart/redis-cart.yaml
-  - sync-controller/sync-controller.yaml
+

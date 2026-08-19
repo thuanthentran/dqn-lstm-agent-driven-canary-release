@@ -12,5 +12,5 @@ env:
     value: "1"
 readinessProbe:
   initialDelaySeconds: 15
-  exec:
-    command: ["/bin/grpc_health_probe", "-addr=:8080"]
+  grpc:
+    port: 8080

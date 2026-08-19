@@ -8,5 +8,5 @@ env:
     value: "redis-cart:6379"
 readinessProbe:
   initialDelaySeconds: 15
-  exec:
-    command: ["/bin/grpc_health_probe", "-addr=:7070", "-rpc-timeout=5s"]
+  grpc:
+    port: 7070

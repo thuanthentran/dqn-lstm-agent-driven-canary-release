@@ -22,5 +22,5 @@ env:
     value: "1"
 readinessProbe:
   initialDelaySeconds: 20
-  exec:
-    command: ["/bin/grpc_health_probe", "-addr=:5050"]
+  grpc:
+    port: 5050
