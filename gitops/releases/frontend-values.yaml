@@ -4,7 +4,7 @@ image: ghcr.io/thuanthentran/frontend:latest
 containerPort: 8080
 portName: http
 serviceType: NodePort
-nodePort: 30080
+nodePort: 30081
 env:
   - name: PORT
     value: "8080"
