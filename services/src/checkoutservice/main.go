@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	pb "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/genproto"
+	"github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/chaos"
 	money "github.com/GoogleCloudPlatform/microservices-demo/src/checkoutservice/money"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
@@ -107,6 +108,11 @@ func main() {
 		port = os.Getenv("PORT")
 	}
 
+	// Load chaos configuration from environment variables.
+	// All CHAOS_* vars default to "disabled", so normal deployments
+	// are completely unaffected unless CHAOS_ENABLED=true is set.
+	chaosCfg := chaos.LoadFromEnv()
+
 	svc := new(checkoutService)
 	mustMapEnv(&svc.shippingSvcAddr, "SHIPPING_SERVICE_ADDR")
 	mustMapEnv(&svc.productCatalogSvcAddr, "PRODUCT_CATALOG_SERVICE_ADDR")
@@ -129,14 +135,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var srv *grpc.Server
-
 	// Propagate trace context always
 	otel.SetTextMapPropagator(
 		propagation.NewCompositeTextMapPropagator(
 			propagation.TraceContext{}, propagation.Baggage{}))
-	srv = grpc.NewServer(
+
+	// Register the chaos interceptor in the chain.
+	// When CHAOS_ENABLED=false (default), chaosCfg.Apply is a no-op.
+	srv := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.ChainUnaryInterceptor(
+			chaosCfg.UnaryServerInterceptor(),
+		),
 	)
 
 	pb.RegisterCheckoutServiceServer(srv, svc)

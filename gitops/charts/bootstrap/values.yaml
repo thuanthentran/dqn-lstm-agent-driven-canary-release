@@ -48,7 +48,4 @@ services:
   - name: shippingservice
     chartPath: gitops/charts/universal-canary
     valueFile: ../../releases/shippingservice-values.yaml
-
-  - name: shoppingassistantservice
-    chartPath: gitops/charts/universal-canary
-    valueFile: ../../releases/shoppingassistantservice-values.yaml
+

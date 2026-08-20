@@ -36,7 +36,7 @@ on:
           - productcatalogservice
           - recommendationservice
           - shippingservice
-          - shoppingassistantservice
+
 
 permissions:
   contents: write   # needed to commit values file updates
@@ -83,15 +83,14 @@ jobs:
               - 'services/src/recommendationservice/**'
             shippingservice:
               - 'services/src/shippingservice/**'
-            shoppingassistantservice:
-              - 'services/src/shoppingassistantservice/**'
+
 
       - name: Build matrix from changed services
         id: set-matrix
         run: |
           # If manual dispatch with specific service, use that
           if [[ "${{ github.event.inputs.service }}" == "all" ]]; then
-            echo 'matrix=["adservice", "cartservice", "checkoutservice", "currencyservice", "emailservice", "frontend", "loadgenerator", "paymentservice", "productcatalogservice", "recommendationservice", "shippingservice", "shoppingassistantservice"]' >> $GITHUB_OUTPUT
+            echo 'matrix=["adservice", "cartservice", "checkoutservice", "currencyservice", "emailservice", "frontend", "loadgenerator", "paymentservice", "productcatalogservice", "recommendationservice", "shippingservice"]' >> $GITHUB_OUTPUT
             exit 0
           elif [[ -n "${{ github.event.inputs.service }}" ]]; then
             echo "matrix=[\"${{ github.event.inputs.service }}\"]" >> $GITHUB_OUTPUT
