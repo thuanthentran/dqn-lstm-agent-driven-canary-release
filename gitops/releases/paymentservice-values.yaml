@@ -1,6 +1,6 @@
 serviceName: paymentservice
 replicas: 1
-image: ghcr.io/thuanthentran/paymentservice:latest
+image: ghcr.io/thuanthentran/paymentservice:df41014bdcfcec78cc5d92acf9c301d627e56e79
 containerPort: 50051
 portName: grpc
 env:
