@@ -209,3 +209,17 @@ Dự án được module hóa, và để đi sâu vào chi tiết của từng t
 - [Load Generator (Traffic Gen)](loadgenerator/README.md): Cấu trúc kiến trúc thành phần sinh tải ảo.
 - [Sample Microservice (Target Apps)](services/src/README.md): Kiến trúc ứng dụng mục tiêu được tiêm lỗi bằng FastAPI & gRPC.
 - [RL Agent Services (AI & UI)](services/agent/README.md): Kiến trúc của mô hình TransformerPPO và Dashboard theo dõi trực tiếp.
+
+## Nếu dùng private cloud (Openstack)
+ArgoCD:
+```Powershell
+  ssh -L 30443:localhost:30443 thentt@192.168.120.206 -i "C:\Users\ASUS\.ssh\id_rsa"
+```
+Prometheus:
+```Powershell
+  ssh -L 9090:localhost:30090 thentt@192.168.120.206 -i "C:\Users\ASUS\.ssh\id_rsa"
+```
+kubectl client:
+```Powershell
+  ssh -L 6443:10.0.0.203:6443 thentt@192.168.120.206 -i "C:\Users\ASUS\.ssh\id_rsa"
+```

@@ -1,0 +1,27 @@
+name: S1_high_latency
+duration_minutes: 15
+target_rollout: "checkoutservice"
+namespace: "msdemo"
+steps:
+  - t_offset_seconds: 0
+    chaos: 
+      CHAOS_ENABLED: "true"
+      CHAOS_LATENCY_DIST: "lognormal"
+      CHAOS_LATENCY_MS_MIN: "10"
+      CHAOS_LATENCY_MS_MAX: "50"
+  - t_offset_seconds: 120
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "50"
+      CHAOS_LATENCY_MS_MAX: "200"
+  - t_offset_seconds: 240
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "100"
+      CHAOS_LATENCY_MS_MAX: "400"
+  - t_offset_seconds: 360
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "300"
+      CHAOS_LATENCY_MS_MAX: "800"
+  - t_offset_seconds: 480
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "500"
+      CHAOS_LATENCY_MS_MAX: "1500"

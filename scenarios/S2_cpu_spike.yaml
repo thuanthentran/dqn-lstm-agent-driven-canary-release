@@ -1,0 +1,18 @@
+name: S2_cpu_spike
+duration_minutes: 15
+target_rollout: "checkoutservice"
+namespace: "msdemo"
+steps:
+  - t_offset_seconds: 0
+    chaos: 
+      CHAOS_ENABLED: "true"
+      CHAOS_CPU_PERCENT: "0"
+  - t_offset_seconds: 120
+    chaos: 
+      CHAOS_CPU_PERCENT: "50"
+  - t_offset_seconds: 240
+    chaos: 
+      CHAOS_CPU_PERCENT: "80"
+  - t_offset_seconds: 360
+    chaos: 
+      CHAOS_CPU_PERCENT: "100"

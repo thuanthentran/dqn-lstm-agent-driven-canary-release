@@ -1,0 +1,22 @@
+name: S4_error_burst
+duration_minutes: 15
+target_rollout: "checkoutservice"
+namespace: "msdemo"
+steps:
+  - t_offset_seconds: 0
+    chaos: 
+      CHAOS_ENABLED: "true"
+      CHAOS_ERROR_RATE: "0.02"
+      CHAOS_ERROR_CODE: "UNAVAILABLE"
+  - t_offset_seconds: 120
+    chaos: 
+      CHAOS_ERROR_RATE: "0.8"
+  - t_offset_seconds: 210
+    chaos: 
+      CHAOS_ERROR_RATE: "0.02"
+  - t_offset_seconds: 360
+    chaos: 
+      CHAOS_ERROR_RATE: "0.8"
+  - t_offset_seconds: 450
+    chaos: 
+      CHAOS_ERROR_RATE: "0.02"

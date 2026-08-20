@@ -1,0 +1,28 @@
+name: S5_cascading_failure
+duration_minutes: 15
+target_rollout: "checkoutservice"
+namespace: "msdemo"
+steps:
+  - t_offset_seconds: 0
+    chaos: 
+      CHAOS_ENABLED: "true"
+      CHAOS_LATENCY_DIST: "lognormal"
+      CHAOS_LATENCY_MS_MIN: "10"
+      CHAOS_LATENCY_MS_MAX: "50"
+      CHAOS_ERROR_RATE: "0.0"
+  - t_offset_seconds: 180
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "100"
+      CHAOS_LATENCY_MS_MAX: "300"
+      CHAOS_ERROR_RATE: "0.2"
+      CHAOS_ERROR_CODE: "UNAVAILABLE"
+  - t_offset_seconds: 360
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "300"
+      CHAOS_LATENCY_MS_MAX: "800"
+      CHAOS_ERROR_RATE: "0.5"
+  - t_offset_seconds: 540
+    chaos: 
+      CHAOS_LATENCY_MS_MIN: "800"
+      CHAOS_LATENCY_MS_MAX: "2000"
+      CHAOS_ERROR_RATE: "0.8"
