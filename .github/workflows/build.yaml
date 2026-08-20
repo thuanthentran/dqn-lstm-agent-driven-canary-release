@@ -134,11 +134,24 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}"
           echo "image=${IMAGE,,}" >> $GITHUB_OUTPUT
 
+      # cartservice keeps its Dockerfile one level deeper (src/Dockerfile).
+      # All other services have it at the context root.
+      - name: Resolve Dockerfile path
+        id: dockerfile
+        run: |
+          NESTED="./services/src/${{ matrix.service }}/src/Dockerfile"
+          DEFAULT="./services/src/${{ matrix.service }}/Dockerfile"
+          if [[ -f "${NESTED}" ]]; then
+            echo "path=${NESTED}" >> $GITHUB_OUTPUT
+          else
+            echo "path=${DEFAULT}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
           context: ./services/src/${{ matrix.service }}
-          file: ./services/src/${{ matrix.service }}/Dockerfile
+          file: ${{ steps.dockerfile.outputs.path }}
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}:${{ github.sha }}
@@ -156,6 +169,8 @@ jobs:
             echo "WARNING: ${VALUES_FILE} not found, skipping update"
           fi
 
+      # Multiple matrix jobs run in parallel and all push to the same branch.
+      # A retry loop with pull --rebase handles the resulting race condition.
       - name: Commit and push GitOps values update
         run: |
           git config user.name "github-actions[bot]"
@@ -163,7 +178,19 @@ jobs:
           git add gitops/releases/${{ matrix.service }}-values.yaml
           if git diff --cached --quiet; then
             echo "No changes to commit for ${{ matrix.service }}"
-          else
-            git commit -m "ci(gitops): update ${{ matrix.service }} image -> ${{ github.sha }}"
-            git push origin ${{ github.ref_name }}
+            exit 0
           fi
+          git commit -m "ci(gitops): update ${{ matrix.service }} image -> ${{ github.sha }}"
+
+          # Retry up to 5 times in case another parallel job pushed first
+          for attempt in 1 2 3 4 5; do
+            echo "Push attempt ${attempt}/5 for ${{ matrix.service }}..."
+            if git push origin ${{ github.ref_name }}; then
+              echo "Push succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Push rejected — pulling remote changes and rebasing..."
+            git pull --rebase origin ${{ github.ref_name }}
+          done
+          echo "ERROR: failed to push after 5 attempts"
+          exit 1
