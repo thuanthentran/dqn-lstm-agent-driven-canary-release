@@ -1,6 +1,6 @@
 serviceName: checkoutservice
 replicas: 1
-image: ghcr.io/thuanthentran/checkoutservice:latest
+image: ghcr.io/thuanthentran/checkoutservice:44a4660479d4ffcda99f18067732e1395665328d
 containerPort: 5050
 portName: grpc
 env:
