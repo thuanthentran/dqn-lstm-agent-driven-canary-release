@@ -134,23 +134,27 @@ jobs:
           IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}"
           echo "image=${IMAGE,,}" >> $GITHUB_OUTPUT
 
-      # cartservice keeps its Dockerfile one level deeper (src/Dockerfile).
-      # All other services have it at the context root.
-      - name: Resolve Dockerfile path
+      # cartservice is a .NET project: its Dockerfile AND all source files
+      # (cartservice.csproj, *.cs, …) live inside src/, not at the service root.
+      # Docker's COPY instructions are relative to the build context, so both
+      # the context and the Dockerfile path must point at src/ for that service.
+      # All other services have Dockerfile + source at the service root.
+      - name: Resolve build context and Dockerfile path
         id: dockerfile
         run: |
-          NESTED="./services/src/${{ matrix.service }}/src/Dockerfile"
-          DEFAULT="./services/src/${{ matrix.service }}/Dockerfile"
-          if [[ -f "${NESTED}" ]]; then
-            echo "path=${NESTED}" >> $GITHUB_OUTPUT
+          NESTED_DOCKERFILE="./services/src/${{ matrix.service }}/src/Dockerfile"
+          if [[ -f "${NESTED_DOCKERFILE}" ]]; then
+            echo "context=./services/src/${{ matrix.service }}/src" >> $GITHUB_OUTPUT
+            echo "path=${NESTED_DOCKERFILE}"                        >> $GITHUB_OUTPUT
           else
-            echo "path=${DEFAULT}" >> $GITHUB_OUTPUT
+            echo "context=./services/src/${{ matrix.service }}"    >> $GITHUB_OUTPUT
+            echo "path=./services/src/${{ matrix.service }}/Dockerfile" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          context: ./services/src/${{ matrix.service }}
+          context: ${{ steps.dockerfile.outputs.context }}
           file: ${{ steps.dockerfile.outputs.path }}
           push: true
           tags: |
