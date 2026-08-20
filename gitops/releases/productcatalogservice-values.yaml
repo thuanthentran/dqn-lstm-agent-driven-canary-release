@@ -1,6 +1,6 @@
 serviceName: productcatalogservice
 replicas: 1
-image: ghcr.io/thuanthentran/productcatalogservice:0fc5ec3a57a5422dfad1eb61b604b7faa19fcdf5
+image: ghcr.io/thuanthentran/productcatalogservice:latest
 containerPort: 3550
 portName: grpc
 env:

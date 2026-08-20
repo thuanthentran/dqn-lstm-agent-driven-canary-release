@@ -1,6 +1,6 @@
 serviceName: frontend
 replicas: 1
-image: ghcr.io/thuanthentran/frontend:0fc5ec3a57a5422dfad1eb61b604b7faa19fcdf5
+image: ghcr.io/thuanthentran/frontend:latest
 containerPort: 8080
 portName: http
 serviceType: NodePort

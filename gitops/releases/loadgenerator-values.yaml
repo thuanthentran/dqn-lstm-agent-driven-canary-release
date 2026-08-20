@@ -1,6 +1,6 @@
 serviceName: loadgenerator
 replicas: 1
-image: ghcr.io/thuanthentran/loadgenerator:0fc5ec3a57a5422dfad1eb61b604b7faa19fcdf5
+image: ghcr.io/thuanthentran/loadgenerator:latest
 isLoadGenerator: true
 containerPort: 0
 portName: none
