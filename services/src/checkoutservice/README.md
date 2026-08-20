@@ -128,3 +128,5 @@ env:
 | `chaos/chaos.go` | **New** — fault injection package (Config, Apply, UnaryServerInterceptor, distributions) |
 | `main.go` | Added `chaos` import; `chaos.LoadFromEnv()` call; `grpc.ChainUnaryInterceptor(chaosCfg.UnaryServerInterceptor())` on the gRPC server |
 | `README.md` | This documentation |
+
+## Trigger CI Build
