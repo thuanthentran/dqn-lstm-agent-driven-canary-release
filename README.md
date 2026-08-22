@@ -236,7 +236,7 @@ kubectl client:
     "lineColor": "#999999",
     "secondaryColor": "#f5f7fa",
     "tertiaryColor": "#ffffff",
-    "fontSize": "50",
+    "fontSize": "14px",
     "fontFamily": "Segoe UI, Helvetica, Arial, sans-serif"
   },
   "flowchart": {
@@ -251,6 +251,7 @@ flowchart LR
     %% Định nghĩa giao diện các khối
     classDef dashbox fill:#ffffff,stroke:#999,stroke-width:1.5px,stroke-dasharray: 4 4;
     classDef solidbox fill:#fbfbfc,stroke:#aaa,stroke-width:1px;
+    classDef feedbacknode fill:#f0f0f0,stroke:#bbb,stroke-width:0.5px,font-size:10px,color:#777;
     %% ================= KHỐI 1: CI/CD (BÊN TRÁI) =================
     subgraph CI_CD ["Khu vực CI/CD & Phát triển"]
         direction BT
@@ -287,13 +288,18 @@ flowchart LR
             Frontend --> MS4
         end
         
-        Orchestrator --> App_Space
+        Orchestrator --> Frontend
         Orchestrator <--> Controller
         Controller --> Target
         
         AI -- "Traffic Routing Signals" --> Controller
         Orchestrator --> AI
-        App_Space -- "Monitoring<br/>(CPU, RAM, Sub-ms Latency)" --> AI
+        MonitorNode(("Monitoring Data")):::feedbacknode
+        MS1 -.-> MonitorNode
+        MS2 -.-> MonitorNode
+        Target -.-> MonitorNode
+        MS4 -.-> MonitorNode
+        MonitorNode -- "CPU, RAM,<br/>Sub-ms Latency" --> AI
     end
     %% ================= KHỐI 3: NGƯỜI DÙNG (BÊN PHẢI) =================
     subgraph Users ["Khu vực Người dùng"]
@@ -309,9 +315,12 @@ flowchart LR
     Registry --> Orchestrator
     Manifests --> Orchestrator
     
-    %% Đường Feedback Loop được neo thẳng từ App_Space ngược về Dev/DevOps
-    DevOps <-- "Feedback Loop" --- App_Space
-    Dev <-- "Feedback Loop" --- App_Space
+    %% Đường Feedback Loop: dùng node ẩn đại diện thay vì nối thẳng vào subgraph App_Space
+    %% (nối thẳng vào subgraph là nguyên nhân gây lỗi "Not possible to find intersection")
+    FeedbackNode(("Feedback Signals")):::feedbacknode
+    App_Space --> FeedbackNode
+    FeedbackNode --> DevOps
+    FeedbackNode --> Dev
     
     %% Users truy cập vào Frontend (dùng mũi tên ngược để ép Users nằm bên phải)
     Frontend <== "Request" === U1
