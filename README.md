@@ -223,3 +223,104 @@ kubectl client:
 ```Powershell
   ssh -L 6443:10.0.0.203:6443 thentt@192.168.120.206 -i "C:\Users\ASUS\.ssh\id_rsa"
 ```
+
+## Sơ đồ
+
+```Mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "primaryColor": "#ffffff",
+    "primaryTextColor": "#222222",
+    "primaryBorderColor": "#888888",
+    "lineColor": "#999999",
+    "secondaryColor": "#f5f7fa",
+    "tertiaryColor": "#ffffff",
+    "fontSize": "50",
+    "fontFamily": "Segoe UI, Helvetica, Arial, sans-serif"
+  },
+  "flowchart": {
+    "nodeSpacing": 25,
+    "rankSpacing": 35,
+    "curve": "basis",
+    "htmlLabels": true,
+    "useMaxWidth": true
+  }
+}}%%
+flowchart LR
+    %% Định nghĩa giao diện các khối
+    classDef dashbox fill:#ffffff,stroke:#999,stroke-width:1.5px,stroke-dasharray: 4 4;
+    classDef solidbox fill:#fbfbfc,stroke:#aaa,stroke-width:1px;
+    %% ================= KHỐI 1: CI/CD (BÊN TRÁI) =================
+    subgraph CI_CD ["Khu vực CI/CD & Phát triển"]
+        direction BT
+        Dev["Dev Team"] --> VCS["Version Control System"]
+        VCS --> CI["CI Build"]
+        CI -- "Artifacts" --> Registry["Container Registry"]
+        
+        DevOps["DevOps Team"] --> Manifests["Deployment Manifests"]
+    end
+    %% ================= KHỐI 2: CD SPACE (Ở GIỮA) =================
+    subgraph CD_Space ["Continuous Delivery Space (Hạ tầng Edge 6G)"]
+        direction TB
+        Orchestrator["Container Orchestrator(s)<br/>(Edge K8s / ArgoCD)"]
+        Controller["Service Controller<br/>(Argo Rollouts)"]
+        AI["AI/RL Engine<br/>(Transformer + PPO)"]
+        
+        subgraph App_Space ["Microservices Application"]
+            direction TB
+            MS1["Microservice #1"]
+            MS2["Microservice #2"]
+            
+            subgraph Target ["Dịch vụ Canary"]
+                Stable["Microservice #3 (Stable)"]
+                Canary["Microservice #3 (Canary)"]
+            end
+            
+            MS4["Microservice #4 ... #n"]
+            Frontend["Frontend Microservice<br/>(Edge Gateway)"]
+            
+            MS2 --> Target
+            Frontend --> MS1
+            Frontend --> MS2
+            Frontend --> Target
+            Frontend --> MS4
+        end
+        
+        Orchestrator --> App_Space
+        Orchestrator <--> Controller
+        Controller --> Target
+        
+        AI -- "Traffic Routing Signals" --> Controller
+        Orchestrator --> AI
+        App_Space -- "Monitoring<br/>(CPU, RAM, Sub-ms Latency)" --> AI
+    end
+    %% ================= KHỐI 3: NGƯỜI DÙNG (BÊN PHẢI) =================
+    subgraph Users ["Khu vực Người dùng"]
+        direction TB
+        U1["User #1<br/>(E-sports/URLLC)"]
+        U2["User #2"]
+        Un["User #n"]
+    end
+    %% ================= KHỐI NS-3 =================
+    NS3["ns-3 Simulator<br/>(Dữ liệu giả lập mạng 6G)"]
+    %% ================= CÁC ĐƯỜNG LIÊN KẾT =================
+    %% CI/CD đổ vào Orchestrator
+    Registry --> Orchestrator
+    Manifests --> Orchestrator
+    
+    %% Đường Feedback Loop được neo thẳng từ App_Space ngược về Dev/DevOps
+    DevOps <-- "Feedback Loop" --- App_Space
+    Dev <-- "Feedback Loop" --- App_Space
+    
+    %% Users truy cập vào Frontend (dùng mũi tên ngược để ép Users nằm bên phải)
+    Frontend <== "Request" === U1
+    Frontend <== "Request" === U2
+    Frontend <== "Request" === Un
+    
+    %% ns-3 cung cấp dữ liệu cho AI
+    NS3 -.-> |"Offline Training Traces"| AI
+    %% ================= GÁN STYLE =================
+    class CD_Space,App_Space,Target dashbox;
+    class CI_CD,Users solidbox;
+```
