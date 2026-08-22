@@ -226,7 +226,7 @@ kubectl client:
 
 ## Sơ đồ
 
-```Mermaid
+```mermaid
 %%{init: {
   "theme": "base",
   "themeVariables": {
