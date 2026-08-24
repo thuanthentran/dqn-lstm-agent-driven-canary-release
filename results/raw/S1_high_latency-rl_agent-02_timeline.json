@@ -1,0 +1,49 @@
+{
+  "run_id": "S1_high_latency-rl_agent-02",
+  "scenario": "S1_high_latency",
+  "target": "checkoutservice",
+  "events": [
+    {
+      "timestamp": "2026-08-20T15:21:28.292647+00:00",
+      "t_offset": 0,
+      "chaos_params": {
+        "CHAOS_ENABLED": "true",
+        "CHAOS_LATENCY_DIST": "lognormal",
+        "CHAOS_LATENCY_MS_MIN": "10",
+        "CHAOS_LATENCY_MS_MAX": "50"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:23:28.260330+00:00",
+      "t_offset": 120,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "50",
+        "CHAOS_LATENCY_MS_MAX": "200"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:25:28.274094+00:00",
+      "t_offset": 240,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "100",
+        "CHAOS_LATENCY_MS_MAX": "400"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:27:28.284393+00:00",
+      "t_offset": 360,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "300",
+        "CHAOS_LATENCY_MS_MAX": "800"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:29:28.297010+00:00",
+      "t_offset": 480,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "500",
+        "CHAOS_LATENCY_MS_MAX": "1500"
+      }
+    }
+  ]
+}

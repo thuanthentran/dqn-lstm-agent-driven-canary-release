@@ -1,0 +1,36 @@
+{
+  "run_id": "S3_memory_leak-rl_agent-01",
+  "scenario": "S3_memory_leak",
+  "target": "checkoutservice",
+  "events": [
+    {
+      "timestamp": "2026-08-20T15:56:33.388055+00:00",
+      "t_offset": 0,
+      "chaos_params": {
+        "CHAOS_ENABLED": "true",
+        "CHAOS_MEM_ALLOC_MB": "0"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:59:33.741701+00:00",
+      "t_offset": 180,
+      "chaos_params": {
+        "CHAOS_MEM_ALLOC_MB": "50"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T16:02:33.461513+00:00",
+      "t_offset": 360,
+      "chaos_params": {
+        "CHAOS_MEM_ALLOC_MB": "100"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T16:05:33.390539+00:00",
+      "t_offset": 540,
+      "chaos_params": {
+        "CHAOS_MEM_ALLOC_MB": "200"
+      }
+    }
+  ]
+}

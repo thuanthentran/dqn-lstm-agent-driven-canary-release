@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # =============================================================================
 # setup-cluster.sh
 # DQN-LSTM Canary Release — K8s Cluster Setup
@@ -95,8 +95,8 @@ log "${BOLD}[2/7] Khởi tạo cụm K8s...${RESET}"
 if kubectl cluster-info &>/dev/null; then
   warn "Cụm đã tồn tại, bỏ qua bước kubeadm init"
 else
-  # --pod-network-cidr=10.244.0.0/16 là CIDR mặc định Flannel yêu cầu
-  kubeadm init --pod-network-cidr=10.244.0.0/16 2>&1 | tee /tmp/kubeadm-init.log
+  # --pod-network-cidr=192.168.0.0/16 là CIDR mặc định Calico yêu cầu
+  kubeadm init --pod-network-cidr=192.168.0.0/16 2>&1 | tee /tmp/kubeadm-init.log
   ok "kubeadm init thành công"
 fi
 
@@ -118,16 +118,16 @@ kubectl taint nodes --all node-role.kubernetes.io/control-plane- 2>/dev/null || 
 ok "Đã bỏ control-plane taint (single-node mode)"
 
 # =============================================================================
-# BƯỚC 3 — Cài CNI: Flannel
+# BƯỚC 3 — Cài CNI: Calico
 # =============================================================================
-log "${BOLD}[3/7] Cài Flannel CNI...${RESET}"
+log "${BOLD}[3/7] Cài Calico CNI...${RESET}"
 
 kubectl apply -f \
-  https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+  https://raw.githubusercontent.com/projectcalico/calico/v3.28.0/manifests/calico.yaml
 
-log "Chờ Flannel pods sẵn sàng..."
-kubectl rollout status daemonset/kube-flannel-ds -n kube-flannel --timeout=120s
-ok "Flannel đã sẵn sàng"
+log "Chờ Calico pods sẵn sàng..."
+kubectl rollout status daemonset/calico-node -n kube-system --timeout=120s
+ok "Calico đã sẵn sàng"
 
 # Chờ control-plane node Ready
 log "Chờ node Ready..."
@@ -137,28 +137,28 @@ ok "Node đã Ready: $(kubectl get nodes --no-headers | awk '{print $1, $2}')"
 # =============================================================================
 # BƯỚC 4 — Cài Istio
 # =============================================================================
-log "${BOLD}[4/7] Cài Istio ${ISTIO_VERSION}...${RESET}"
+  log "${BOLD}[4/7] Cài Istio ${ISTIO_VERSION}...${RESET}"
 
-ISTIO_DIR="/opt/istio-${ISTIO_VERSION}"
+  ISTIO_DIR="/opt/istio-${ISTIO_VERSION}"
 
-if [[ ! -d "$ISTIO_DIR" ]]; then
-  curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${ISTIO_VERSION} TARGET_ARCH=x86_64 sh -
-  mv "istio-${ISTIO_VERSION}" "$ISTIO_DIR"
-fi
+  if [[ ! -d "$ISTIO_DIR" ]]; then
+    curl -L https://istio.io/downloadIstio | ISTIO_VERSION=${ISTIO_VERSION} TARGET_ARCH=x86_64 sh -
+    mv "istio-${ISTIO_VERSION}" "$ISTIO_DIR"
+  fi
 
-ISTIOCTL="$ISTIO_DIR/bin/istioctl"
-ln -sf "$ISTIOCTL" /usr/local/bin/istioctl
+  ISTIOCTL="$ISTIO_DIR/bin/istioctl"
+  ln -sf "$ISTIOCTL" /usr/local/bin/istioctl
 
-# Pre-check (bỏ qua lỗi không nghiêm trọng)
-istioctl x precheck 2>&1 || warn "Pre-check có cảnh báo, tiếp tục..."
+  # Pre-check (bỏ qua lỗi không nghiêm trọng)
+  istioctl x precheck 2>&1 || warn "Pre-check có cảnh báo, tiếp tục..."
 
-# Cài profile default (istiod + ingress gateway)
-istioctl install --set profile=default -y
-ok "Istio đã cài xong"
+  # Cài profile default (istiod + ingress gateway)
+  istioctl install --set profile=default -y
+  ok "Istio đã cài xong"
 
-# Chờ istiod sẵn sàng
-kubectl rollout status deployment/istiod -n istio-system --timeout=180s
-ok "istiod sẵn sàng"
+  # Chờ istiod sẵn sàng
+  kubectl rollout status deployment/istiod -n istio-system --timeout=180s
+  ok "istiod sẵn sàng"
 
 # =============================================================================
 # BƯỚC 5 — Cài Prometheus (tối giản)

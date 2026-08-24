@@ -1,0 +1,46 @@
+{
+  "run_id": "S5_cascading_failure-rl_agent-01",
+  "scenario": "S5_cascading_failure",
+  "target": "checkoutservice",
+  "events": [
+    {
+      "timestamp": "2026-08-21T08:38:04.432724+00:00",
+      "t_offset": 0,
+      "chaos_params": {
+        "CHAOS_ENABLED": "true",
+        "CHAOS_LATENCY_DIST": "lognormal",
+        "CHAOS_LATENCY_MS_MIN": "10",
+        "CHAOS_LATENCY_MS_MAX": "50",
+        "CHAOS_ERROR_RATE": "0.0"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T08:41:04.192992+00:00",
+      "t_offset": 180,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "100",
+        "CHAOS_LATENCY_MS_MAX": "300",
+        "CHAOS_ERROR_RATE": "0.2",
+        "CHAOS_ERROR_CODE": "UNAVAILABLE"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T08:44:04.325771+00:00",
+      "t_offset": 360,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "300",
+        "CHAOS_LATENCY_MS_MAX": "800",
+        "CHAOS_ERROR_RATE": "0.5"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T08:47:04.256955+00:00",
+      "t_offset": 540,
+      "chaos_params": {
+        "CHAOS_LATENCY_MS_MIN": "800",
+        "CHAOS_LATENCY_MS_MAX": "2000",
+        "CHAOS_ERROR_RATE": "0.8"
+      }
+    }
+  ]
+}

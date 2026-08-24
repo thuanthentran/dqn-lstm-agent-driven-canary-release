@@ -1,0 +1,44 @@
+{
+  "run_id": "S4_error_burst-rule_based-01",
+  "scenario": "S4_error_burst",
+  "target": "checkoutservice",
+  "events": [
+    {
+      "timestamp": "2026-08-21T09:38:58.328198+00:00",
+      "t_offset": 0,
+      "chaos_params": {
+        "CHAOS_ENABLED": "true",
+        "CHAOS_ERROR_RATE": "0.02",
+        "CHAOS_ERROR_CODE": "UNAVAILABLE"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T09:40:58.226332+00:00",
+      "t_offset": 120,
+      "chaos_params": {
+        "CHAOS_ERROR_RATE": "0.8"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T09:42:28.289087+00:00",
+      "t_offset": 210,
+      "chaos_params": {
+        "CHAOS_ERROR_RATE": "0.02"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T09:44:58.248674+00:00",
+      "t_offset": 360,
+      "chaos_params": {
+        "CHAOS_ERROR_RATE": "0.8"
+      }
+    },
+    {
+      "timestamp": "2026-08-21T09:46:28.222303+00:00",
+      "t_offset": 450,
+      "chaos_params": {
+        "CHAOS_ERROR_RATE": "0.02"
+      }
+    }
+  ]
+}

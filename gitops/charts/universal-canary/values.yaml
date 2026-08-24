@@ -2,6 +2,9 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
+# 'rl' for Reinforcement Learning Agent, 'rule-based' for static threshold analysis
+evaluationMode: "rl"
+
 serviceName: example-service
 replicas: 1
 image: nginx:latest

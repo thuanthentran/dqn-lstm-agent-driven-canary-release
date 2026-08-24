@@ -1,0 +1,36 @@
+{
+  "run_id": "S2_cpu_spike-rl_agent-01",
+  "scenario": "S2_cpu_spike",
+  "target": "checkoutservice",
+  "events": [
+    {
+      "timestamp": "2026-08-20T15:45:27.236970+00:00",
+      "t_offset": 0,
+      "chaos_params": {
+        "CHAOS_ENABLED": "true",
+        "CHAOS_CPU_PERCENT": "0"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:47:27.483529+00:00",
+      "t_offset": 120,
+      "chaos_params": {
+        "CHAOS_CPU_PERCENT": "50"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:49:27.171002+00:00",
+      "t_offset": 240,
+      "chaos_params": {
+        "CHAOS_CPU_PERCENT": "80"
+      }
+    },
+    {
+      "timestamp": "2026-08-20T15:51:27.094437+00:00",
+      "t_offset": 360,
+      "chaos_params": {
+        "CHAOS_CPU_PERCENT": "100"
+      }
+    }
+  ]
+}

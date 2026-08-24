@@ -1,0 +1,1 @@
+timestamp,canary_error_rate,stable_error_rate,canary_p95_latency,stable_p95_latency,traffic_weight_canary

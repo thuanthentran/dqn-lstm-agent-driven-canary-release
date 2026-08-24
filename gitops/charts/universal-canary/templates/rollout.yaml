@@ -65,12 +65,10 @@ spec:
       # ===============================================
       # PROD NAMESPACE STEPS
       # ===============================================
-      - setWeight: 1
-      - pause: {} # Duyệt thủ công ở 1%
       - setWeight: 20
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -85,7 +83,7 @@ spec:
       - setWeight: 50
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -100,7 +98,7 @@ spec:
       - setWeight: 80
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -119,7 +117,7 @@ spec:
       - setWeight: 20
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           # Chạy song song Stress Test Job
           - templateName: {{ .Values.serviceName }}-loadtest
           args:
@@ -136,7 +134,7 @@ spec:
       - setWeight: 50
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           args:
           - name: service-name
             value: {{ .Values.serviceName }}
@@ -151,7 +149,7 @@ spec:
       - setWeight: 80
       - analysis:
           templates:
-          - templateName: {{ .Values.serviceName }}-eval
+          - templateName: {{ if eq .Values.evaluationMode "rule-based" }}{{ .Values.serviceName }}-eval-rule-based{{ else }}{{ .Values.serviceName }}-eval{{ end }}
           args:
           - name: service-name
             value: {{ .Values.serviceName }}

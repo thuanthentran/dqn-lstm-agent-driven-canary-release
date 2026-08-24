@@ -1,0 +1,44 @@
+{{- if not .Values.isLoadGenerator }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ .Values.serviceName }}-eval-rule-based
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  args:
+  - name: service-name
+  - name: stable-hash
+  - name: canary-hash
+  - name: target-weight
+  metrics:
+  - name: canary-error-rate
+    initialDelay: 30s
+    interval: 10s
+    count: 30
+    inconclusiveLimit: 30
+    successCondition: len(result) == 0 || math.IsNaN(result[0]) || result[0] <= 0.05
+    provider:
+      prometheus:
+        address: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          (
+            sum(rate(istio_requests_total{destination_service=~"{{ "{{args.service-name}}" }}-canary.{{ .Values.envNamespace }}.svc.cluster.local.*", response_code=~"5..|4.."}[1m])) 
+            or sum(rate(istio_requests_total{destination_service=~"{{ "{{args.service-name}}" }}-canary.{{ .Values.envNamespace }}.svc.cluster.local.*", grpc_response_status!="0"}[1m])) 
+            or vector(0)
+          ) 
+          / 
+          sum(rate(istio_requests_total{destination_service=~"{{ "{{args.service-name}}" }}-canary.{{ .Values.envNamespace }}.svc.cluster.local.*"}[1m]))
+
+  - name: canary-p95-latency
+    initialDelay: 30s
+    interval: 10s
+    count: 30
+    inconclusiveLimit: 30
+    successCondition: len(result) == 0 || math.IsNaN(result[0]) || result[0] <= 1000
+    provider:
+      prometheus:
+        address: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+        query: |
+          histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service=~"{{ "{{args.service-name}}" }}-canary.{{ .Values.envNamespace }}.svc.cluster.local.*"}[1m])) by (le))
+{{- end }}

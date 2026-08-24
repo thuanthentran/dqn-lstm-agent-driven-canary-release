@@ -5,15 +5,15 @@ from datetime import datetime, timezone
 import os
 import json
 
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:30090")
 
 # Define the queries we want to export
 QUERIES = {
-    "canary_error_rate": 'sum(rate(istio_requests_total{destination_version="canary",response_code=~"5.."}[1m])) / sum(rate(istio_requests_total{destination_version="canary"}[1m]))',
-    "stable_error_rate": 'sum(rate(istio_requests_total{destination_version="stable",response_code=~"5.."}[1m])) / sum(rate(istio_requests_total{destination_version="stable"}[1m]))',
-    "canary_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_version="canary"}[1m])) by (le))',
-    "stable_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_version="stable"}[1m])) by (le))',
-    "traffic_weight_canary": 'sum(rate(istio_requests_total{destination_version="canary"}[1m])) / sum(rate(istio_requests_total[1m]))'
+    "canary_error_rate": '(sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*",response_code=~"5..|4.."}[1m])) or sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*",grpc_response_status!="0"}[1m])) or vector(0)) / sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*"}[1m]))',
+    "stable_error_rate": '(sum(rate(istio_requests_total{destination_service=~"checkoutservice\\\\..*",response_code=~"5..|4.."}[1m])) or sum(rate(istio_requests_total{destination_service=~"checkoutservice\\\\..*",grpc_response_status!="0"}[1m])) or vector(0)) / sum(rate(istio_requests_total{destination_service=~"checkoutservice\\\\..*"}[1m]))',
+    "canary_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service=~"checkoutservice-canary.*"}[1m])) by (le))',
+    "stable_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service=~"checkoutservice\\\\..*"}[1m])) by (le))',
+    "traffic_weight_canary": 'sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*"}[1m])) / sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*|checkoutservice\\\\..*"}[1m]))'
 }
 
 def query_prometheus(query, start_time, end_time, step="15s"):
@@ -43,7 +43,7 @@ def query_prometheus(query, start_time, end_time, step="15s"):
         print(f"Error querying {query}: {e}")
         return pd.Series(dtype=float)
 
-def export_run_data(run_id, start_time_iso, end_time_iso):
+def export_run_data(run_id, start_time_iso, end_time_iso, out_dir="results/raw"):
     # Convert ISO strings to unix timestamps for Prometheus
     start_ts = datetime.fromisoformat(start_time_iso.replace('Z', '+00:00')).timestamp()
     end_ts = datetime.fromisoformat(end_time_iso.replace('Z', '+00:00')).timestamp()
@@ -61,8 +61,8 @@ def export_run_data(run_id, start_time_iso, end_time_iso):
     df = pd.DataFrame(df_dict)
     
     # Save to CSV
-    os.makedirs(f"results/raw/{run_id}", exist_ok=True)
-    csv_path = f"results/raw/{run_id}/metrics.csv"
+    os.makedirs(f"{out_dir}/{run_id}", exist_ok=True)
+    csv_path = f"{out_dir}/{run_id}/metrics.csv"
     df.to_csv(csv_path, index_label="timestamp")
     print(f"Data saved to {csv_path}")
 
@@ -71,6 +71,7 @@ if __name__ == "__main__":
     parser.add_argument("--run-id", required=True, help="Unique Run ID (e.g. S1-RB-01)")
     parser.add_argument("--start", required=True, help="Start time in ISO format (e.g. 2026-08-20T10:00:00Z)")
     parser.add_argument("--end", required=True, help="End time in ISO format")
+    parser.add_argument("--out-dir", default="results/raw", help="Output directory")
     args = parser.parse_args()
     
-    export_run_data(args.run_id, args.start, args.end)
+    export_run_data(args.run_id, args.start, args.end, args.out_dir)
