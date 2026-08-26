@@ -149,28 +149,28 @@ class RLAgentRunner:
         svc_w = config["target"]["service_name"]
         win_w = config["prometheus"]["scrape_window"]
         self._q_canary_err = (
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}-canary.*",'
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-canary.*",'
             f'grpc_response_status!="0"}}[{win_w}])) / '
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}-canary.*"}}[{win_w}]))'
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-canary.*"}}[{win_w}]))'
         )
         self._q_stable_err = (
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}\\\\..*",'
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-stable.*",'
             f'grpc_response_status!="0"}}[{win_w}])) / '
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}\\\\..*"}}[{win_w}]))'
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-stable.*"}}[{win_w}]))'
         )
         self._q_canary_lat = (
             f'histogram_quantile(0.95, sum(rate('
             f'istio_request_duration_milliseconds_bucket{{'
-            f'destination_service=~"{svc_w}-canary.*"}}[{win_w}])) by (le))'
+            f'reporter="destination", destination_service=~"{svc_w}-canary.*"}}[{win_w}])) by (le))'
         )
         self._q_stable_lat = (
             f'histogram_quantile(0.95, sum(rate('
             f'istio_request_duration_milliseconds_bucket{{'
-            f'destination_service=~"{svc_w}\\\\..*"}}[{win_w}])) by (le))'
+            f'reporter="destination", destination_service=~"{svc_w}-stable.*"}}[{win_w}])) by (le))'
         )
         self._q_weight = (
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}-canary.*"}}[{win_w}])) / '
-            f'sum(rate(istio_requests_total{{destination_service=~"{svc_w}.*"}}[{win_w}]))'
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-canary.*"}}[{win_w}])) / '
+            f'sum(rate(istio_requests_total{{reporter="destination", destination_service=~"{svc_w}-(canary|stable).*"}}[{win_w}]))'
         )
 
         # Load model

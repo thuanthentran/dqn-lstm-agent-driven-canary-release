@@ -165,7 +165,13 @@ spec:
       # ===============================================
       # DEFAULT STEPS
       # ===============================================
+      - setWeight: 10
+      - pause: {}
+      - setWeight: 30
+      - pause: {}
       - setWeight: 50
-      - pause: {duration: 30s}
+      - pause: {}
+      - setWeight: 80
+      - pause: {}
       {{- end }}
 {{- end }}

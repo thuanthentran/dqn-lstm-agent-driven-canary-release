@@ -10,15 +10,15 @@ PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:30090")
 # Define the queries we want to export
 QUERIES = {
     # Fix 1 & 2: gRPC error rate (using grpc_response_status) and proper escape for stable service
-    "canary_error_rate": 'sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*", grpc_response_status!="0"}[1m])) / sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*"}[1m]))',
-    "stable_error_rate": 'sum(rate(istio_requests_total{destination_service=~"checkoutservice\\\\..*", grpc_response_status!="0"}[1m])) / sum(rate(istio_requests_total{destination_service=~"checkoutservice\\\\..*"}[1m]))',
+    "canary_error_rate": 'sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-canary.*", grpc_response_status!="0"}[1m])) / sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-canary.*"}[1m]))',
+    "stable_error_rate": 'sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-stable.*", grpc_response_status!="0"}[1m])) / sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-stable.*"}[1m]))',
     
-    # Latency
-    "canary_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service=~"checkoutservice-canary.*"}[1m])) by (le))',
-    "stable_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{destination_service=~"checkoutservice\\\\..*"}[1m])) by (le))',
+    # Latencies (P95)
+    "canary_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{reporter="destination", destination_service=~"checkoutservice-canary.*"}[1m])) by (le))',
+    "stable_p95_latency": 'histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{reporter="destination", destination_service=~"checkoutservice-stable.*"}[1m])) by (le))',
     
-    # Traffic Weight
-    "traffic_weight_canary": 'sum(rate(istio_requests_total{destination_service=~"checkoutservice-canary.*"}[1m])) / sum(rate(istio_requests_total{destination_service=~"checkoutservice.*"}[1m]))',
+    # Traffic distribution
+    "traffic_weight_canary": 'sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-canary.*"}[1m])) / sum(rate(istio_requests_total{reporter="destination", destination_service=~"checkoutservice-(canary|stable).*"}[1m]))',
     
     # Fix 3: Resource Efficiency Metrics
     "cpu_canary_cores": 'sum(rate(container_cpu_usage_seconds_total{namespace="msdemo", pod=~"checkoutservice-canary.*", container!="POD", container!=""}[1m]))',
