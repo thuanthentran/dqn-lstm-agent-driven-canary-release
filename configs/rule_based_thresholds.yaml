@@ -1,0 +1,67 @@
+# Rule-based Controller Threshold Configuration
+# Dùng cho experiment so sánh RL Agent vs Rule-based Canary Release
+#
+# Hai phương pháp:
+#   A) static  — ngưỡng tuyệt đối, theo chuẩn Argo Rollouts / Google SRE
+#   B) ratio   — tỉ lệ canary/stable, đồng nhất với anomaly criterion trong RL env
+
+# ─────────────────────────────────────────────────────────
+# Method A: Static Thresholds (SRE / Argo community standard)
+# Tham khảo: Argo Rollouts docs + Google SRE Book
+# ─────────────────────────────────────────────────────────
+static:
+  # Rollback conditions
+  error_rate_threshold: 0.01      # 1% absolute error rate → anomaly
+  latency_p95_threshold_ms: 500.0 # 500ms P95 latency → anomaly
+  consecutive_failures: 3         # N consecutive check failures → ROLLBACK
+
+  # Promote conditions
+  consecutive_healthy: 5          # N consecutive healthy checks → PROMOTE (+step)
+  promote_step: 0.20              # Tăng canary weight 20% mỗi lần promote
+
+  # Loop control
+  check_interval_s: 15.0          # Cùng tần suất với RL agent (1 step = 15s)
+  max_steps: 50                   # Cùng episode length với RL env
+
+# ─────────────────────────────────────────────────────────
+# Method B: Ratio-based (matches RL env anomaly criterion)
+# canary / stable ratio > threshold → anomaly
+# Cùng định nghĩa "anomaly" với reward logic trong core/env.py:
+#   e_ratio > 2.0 OR l_ratio > 2.0 → anomalous
+# ─────────────────────────────────────────────────────────
+ratio:
+  # Rollback conditions
+  error_ratio_threshold: 2.0      # canary_error / stable_error > 2x → anomaly
+  latency_ratio_threshold: 2.0    # canary_p95 / stable_p95 > 2x → anomaly
+  consecutive_failures: 3         # N consecutive → ROLLBACK
+
+  # Promote conditions
+  consecutive_healthy: 5
+  promote_step: 0.20
+
+  # Loop control
+  check_interval_s: 15.0
+  max_steps: 50
+
+  # Numerical stability
+  epsilon: 1.0e-6                  # Tránh chia cho 0 (dùng làm mẫu số tối thiểu)
+  stable_error_floor: 0.001        # Floor cho stable error rate (tránh ratio spike khi stable ~= 0)
+  stable_latency_floor_ms: 40.0    # Floor cho stable latency (ms)
+
+# ─────────────────────────────────────────────────────────
+# Prometheus connection
+# ─────────────────────────────────────────────────────────
+prometheus:
+  url: "http://localhost:30090"
+  scrape_window: "1m"             # Rate window cho Prometheus queries
+  timeout_s: 5.0                  # HTTP timeout cho mỗi query
+
+# ─────────────────────────────────────────────────────────
+# Target service (Argo Rollouts)
+# ─────────────────────────────────────────────────────────
+target:
+  service_name: "checkoutservice"
+  namespace: "msdemo"
+  argo_rollouts_group: "argoproj.io"
+  argo_rollouts_version: "v1alpha1"
+  argo_rollouts_plural: "rollouts"

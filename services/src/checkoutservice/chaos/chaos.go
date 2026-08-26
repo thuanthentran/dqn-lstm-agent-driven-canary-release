@@ -161,6 +161,11 @@ func (c *Config) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
+		// Do not inject faults into health checks to avoid pod becoming Unready
+		if strings.HasPrefix(info.FullMethod, "/grpc.health.v1.Health") {
+			return handler(ctx, req)
+		}
+		
 		if err := c.Apply(ctx); err != nil {
 			log.WithField("method", info.FullMethod).Warnf("chaos: injecting fault: %v", err)
 			return nil, err

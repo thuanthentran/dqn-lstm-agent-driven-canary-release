@@ -22,5 +22,6 @@ env:
     value: "1"
 readinessProbe:
   initialDelaySeconds: 20
+  timeoutSeconds: 10
   grpc:
     port: 5050
