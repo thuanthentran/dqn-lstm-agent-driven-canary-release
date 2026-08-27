@@ -44,6 +44,8 @@ def main():
     parser.add_argument("--no-locust", action="store_true")
     parser.add_argument("--warmup-sec", type=int, default=180)
     parser.add_argument("--cooldown-sec", type=int, default=120)
+    parser.add_argument("--interval", type=float, default=15.0)
+    parser.add_argument("--max-steps", type=int, default=50)
     args = parser.parse_args()
 
     # Setup directories
@@ -84,9 +86,45 @@ def main():
     print(f"[4/6] Injecting fault: {args.scenario}...")
     fault_inject_time = datetime.now(timezone.utc).isoformat()
     fault_process = None
+    tail_process = None
     if not args.dry_run:
         fault_process = subprocess.Popen(["python3", "scripts/inject_fault.py", "--scenario", args.scenario, "--run-id", run_id])
         
+        # Start streaming ground truth log immediately to avoid losing it if canary pod is deleted
+        try:
+            time.sleep(2) # Give the new canary pod a moment to start
+            cmd = "kubectl get pods -n msdemo -l app=checkoutservice -o json"
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
+            pods = json.loads(res.stdout).get("items", [])
+            
+            canary_pod = None
+            for pod in pods:
+                for c in pod.get("spec", {}).get("containers", []):
+                    for env in c.get("env", []):
+                        if env["name"] == "CHAOS_CONFIG" and run_id in env["value"]:
+                            canary_pod = pod
+                            break
+            
+            if canary_pod:
+                pod_name = canary_pod["metadata"]["name"]
+                gt_path = os.path.join(out_path, "ground_truth.jsonl")
+                print(f"Streaming ground truth log from {pod_name} to {gt_path}...")
+                tail_cmd = f"kubectl exec -n msdemo {pod_name} -c server -- tail -f /var/log/chaos/ground_truth.jsonl > {gt_path}"
+                tail_process = subprocess.Popen(tail_cmd, shell=True)
+                
+                # Save metadata now
+                metadata = {
+                    "run_id": run_id,
+                    "node_name": canary_pod.get("spec", {}).get("nodeName", "unknown"),
+                    "git_commit": get_git_commit(),
+                    "controller": args.controller,
+                    "scenario": scenario_name
+                }
+                with open(os.path.join(out_path, "metadata.json"), "w") as f:
+                    json.dump(metadata, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Failed to start log stream: {e}")
+
     # 5. Controller loop
     print(f"[5/6] Starting controller: {args.controller}...")
     controller_start_time = datetime.now(timezone.utc).isoformat()
@@ -102,14 +140,14 @@ def main():
                 norm_path="models/vec_normalize.pkl",
                 config_path=args.config
             )
-            action_log = runner.run_loop()
+            action_log = runner.run_loop(check_interval=args.interval, max_steps=args.max_steps)
         elif args.controller.startswith("rule_based_"):
             method = args.controller.split("_")[-1]
             ctrl = RuleBasedController.from_config(
                 config_path=args.config,
                 method=method
             )
-            action_log = ctrl.run_loop()
+            action_log = ctrl.run_loop(check_interval=args.interval, max_steps=args.max_steps)
             
     controller_end_time = datetime.now(timezone.utc).isoformat()
     
@@ -145,6 +183,10 @@ def main():
         print("[6/6] Stopping Fault Injection (if still running)...")
         fault_process.terminate()
         
+    if tail_process:
+        print("[6/6] Stopping Ground Truth log stream...")
+        tail_process.terminate()
+        
     print(f"[6/6] Cooldown sleep ({args.cooldown_sec if not args.dry_run else 0.1}s)...")
     if not args.dry_run:
         time.sleep(args.cooldown_sec)
@@ -158,47 +200,7 @@ def main():
             "--end", datetime.now(timezone.utc).isoformat()
         ], check=False)
         
-    print("[6/6] Extracting Metadata and Ground Truth Log...")
-    if not args.dry_run:
-        try:
-            cmd = "kubectl get pods -n msdemo -l app=checkoutservice -o json"
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
-            pods = json.loads(res.stdout).get("items", [])
-            
-            canary_pod = None
-            for pod in pods:
-                containers = pod.get("spec", {}).get("containers", [])
-                for c in containers:
-                    for env in c.get("env", []):
-                        if env["name"] == "CHAOS_CONFIG" and run_id in env["value"]:
-                            canary_pod = pod
-                            break
-            
-            if canary_pod:
-                pod_name = canary_pod["metadata"]["name"]
-                node_name = canary_pod.get("spec", {}).get("nodeName", "unknown")
-                print(f"Found canary pod: {pod_name} on node {node_name}")
-                
-                # Extract ground_truth.jsonl
-                container_name = "server"
-                gt_path = os.path.join(out_path, "ground_truth.jsonl")
-                cp_cmd = f"kubectl exec -n msdemo {pod_name} -c {container_name} -- cat /var/log/chaos/ground_truth.jsonl > {gt_path}"
-                subprocess.run(cp_cmd, shell=True, check=False)
-                
-                # Save metadata.json
-                metadata = {
-                    "run_id": run_id,
-                    "node_name": node_name,
-                    "git_commit": get_git_commit(),
-                    "controller": args.controller,
-                    "scenario": scenario_name
-                }
-                with open(os.path.join(out_path, "metadata.json"), "w") as f:
-                    json.dump(metadata, f, indent=2)
-            else:
-                print("Warning: Canary pod not found for extraction.")
-        except Exception as e:
-            print(f"Failed to extract ground truth / metadata: {e}")
+    print("[6/6] End of data extraction.")
 
     print("[6/6] Final cleanup...")
     if not args.dry_run:
