@@ -69,7 +69,7 @@ def main():
         print("[2/6] Starting Locust load generator...")
         if not args.dry_run:
             locust_process = subprocess.Popen(
-                ["locust", "-f", "loadgenerator/locustfile.py", "--headless", "-u", "100", "-r", "10", "--host", "http://localhost"],
+                ["locust", "-f", "services/src/loadgenerator/locustfile.py", "--headless", "-u", "100", "-r", "10", "--host", "http://localhost"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
     else:

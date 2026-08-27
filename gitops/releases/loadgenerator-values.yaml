@@ -8,4 +8,6 @@ env:
   - name: FRONTEND_ADDR
     value: "frontend:8080"
   - name: USERS
-    value: "10"
+    value: "200"
+  - name: RATE
+    value: "20"
