@@ -25,3 +25,9 @@ readinessProbe:
   timeoutSeconds: 10
   grpc:
     port: 5050
+extraVolumes:
+  - name: chaos-logs
+    emptyDir: {}
+extraVolumeMounts:
+  - name: chaos-logs
+    mountPath: /var/log/chaos

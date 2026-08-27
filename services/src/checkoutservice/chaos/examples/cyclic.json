@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "run_id": "test-cyclic-01",
+  "seed": 42,
+  "resource_safe_mode": true,
+  "signals": {
+    "cpu": {
+      "pattern": "cyclic",
+      "params": {
+        "value_low": 0.0,
+        "value_high": 80.0,
+        "period_sec": 120.0,
+        "duty_cycle": 0.5
+      }
+    }
+  }
+}

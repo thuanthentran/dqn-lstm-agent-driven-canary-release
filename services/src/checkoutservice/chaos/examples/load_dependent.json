@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "run_id": "test-load-dependent-01",
+  "seed": 42,
+  "resource_safe_mode": true,
+  "signals": {
+    "latency": {
+      "pattern": "load_dependent",
+      "params": {
+        "rps_threshold": 50.0,
+        "value_below": 10.0,
+        "value_above": 500.0
+      }
+    }
+  }
+}

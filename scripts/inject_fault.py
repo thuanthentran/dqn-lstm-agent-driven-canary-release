@@ -1,12 +1,9 @@
 import argparse
-import yaml
-import time
-import subprocess
-import os
 import json
+import subprocess
 from datetime import datetime, timezone
 
-def update_rollout_env(target, namespace, new_env_dict):
+def update_rollout_env(target, namespace, config_dict):
     try:
         # Get current JSON
         cmd = f"kubectl get rollout {target} -n {namespace} -o json"
@@ -20,15 +17,16 @@ def update_rollout_env(target, namespace, new_env_dict):
             container['env'] = []
         
         env_list = container['env']
-        for k, v in new_env_dict.items():
-            found = False
-            for i, e in enumerate(env_list):
-                if e['name'] == k:
-                    env_list[i]['value'] = str(v)
-                    found = True
-                    break
-            if not found:
-                env_list.append({"name": k, "value": str(v)})
+        config_str = json.dumps(config_dict)
+        
+        found = False
+        for i, e in enumerate(env_list):
+            if e['name'] == 'CHAOS_CONFIG':
+                env_list[i]['value'] = config_str
+                found = True
+                break
+        if not found:
+            env_list.append({"name": "CHAOS_CONFIG", "value": config_str})
                 
         # Remove managedFields to avoid apply issues
         if 'managedFields' in obj['metadata']:
@@ -39,62 +37,43 @@ def update_rollout_env(target, namespace, new_env_dict):
             json.dump(obj, f)
             
         subprocess.run("kubectl apply -f temp_rollout.json", shell=True, check=True, capture_output=True)
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Successfully updated env for rollout/{target}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Successfully injected CHAOS_CONFIG to rollout/{target}")
     except subprocess.CalledProcessError as e:
         print(f"Error updating rollout: {e.stderr if e.stderr else e.output}")
 
 def inject_fault(scenario_file, run_id, out_dir="results/raw"):
     with open(scenario_file, 'r') as f:
-        scenario = yaml.safe_load(f)
+        if scenario_file.endswith('.json'):
+            config = json.load(f)
+        else:
+            # Fallback wrapper if accidentally passing old YAML (we will assume it's static latency)
+            print("Warning: Passed .yaml file. Converting to static pattern.")
+            import yaml
+            y = yaml.safe_load(f)
+            config = {
+                "enabled": True,
+                "pattern": "static",
+                "signals": {
+                    "latency": {
+                        "pattern": "static",
+                        "params": {"value": 500.0}
+                    }
+                }
+            }
 
-    print(f"=== Starting Scenario: {scenario['name']} ===")
-    target = scenario.get('target_rollout', 'checkoutservice')
-    namespace = scenario.get('namespace', 'msdemo')
+    config["run_id"] = run_id
     
-    # Store timeline for audit
-    timeline = {
-        "run_id": run_id,
-        "scenario": scenario['name'],
-        "target": target,
-        "events": []
-    }
+    target = "checkoutservice"
+    namespace = "msdemo"
     
-    start_time = time.time()
-    
-    for step in scenario['steps']:
-        t_offset = step['t_offset_seconds']
-        chaos_env = step['chaos']
-        
-        # Calculate time to sleep
-        elapsed = time.time() - start_time
-        sleep_time = t_offset - elapsed
-        if sleep_time > 0:
-            print(f"Waiting for {sleep_time:.1f}s until t={t_offset}s...")
-            time.sleep(sleep_time)
-            
-        # Update rollout env
-        update_rollout_env(target, namespace, chaos_env)
-        
-        # Log event
-        timeline['events'].append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "t_offset": t_offset,
-            "chaos_params": chaos_env
-        })
-        
-    print("=== Scenario Steps Completed ===")
-    
-    # Save timeline
-    os.makedirs(out_dir, exist_ok=True)
-    out_file = f"{out_dir}/{run_id}_timeline.json"
-    with open(out_file, 'w') as f:
-        json.dump(timeline, f, indent=2)
-    print(f"Saved chaos timeline to {out_file}")
+    print(f"=== Starting Injection for Run: {run_id} ===")
+    update_rollout_env(target, namespace, config)
+    print("=== Injection Completed (Module will evolve fault internally) ===")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inject faults according to a scenario YAML")
-    parser.add_argument("--scenario", required=True, help="Path to scenario YAML file")
-    parser.add_argument("--run-id", required=True, help="Unique Run ID (e.g. S1-RB-01)")
+    parser = argparse.ArgumentParser(description="Inject faults via CHAOS_CONFIG")
+    parser.add_argument("--scenario", required=True, help="Path to scenario JSON file")
+    parser.add_argument("--run-id", required=True, help="Unique Run ID")
     parser.add_argument("--out-dir", default="results/raw", help="Output directory")
     args = parser.parse_args()
     

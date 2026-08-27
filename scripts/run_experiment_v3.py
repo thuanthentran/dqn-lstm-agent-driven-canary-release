@@ -3,7 +3,7 @@ Unified Experiment Runner for RL Agent vs Rule-based Canary Release.
 
 Usage:
   python3 scripts/run_experiment_v3.py \
-    --scenario scenarios/S1_high_latency.yaml \
+    --scenario services/src/checkoutservice/chaos/examples/linear.json \
     --controller rl_agent \
     --run-num 01 \
     --out-dir result_1 \
@@ -27,6 +27,12 @@ try:
 except ImportError:
     RLAgentRunner = None
 
+def get_git_commit():
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+    except:
+        return "unknown"
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", required=True)
@@ -41,7 +47,7 @@ def main():
     args = parser.parse_args()
 
     # Setup directories
-    scenario_name = os.path.basename(args.scenario).replace(".yaml", "")
+    scenario_name = os.path.basename(args.scenario).replace(".yaml", "").replace(".json", "")
     run_id = f"{scenario_name}-{args.controller}-{args.run_num:02d}"
     out_path = os.path.join(BASE_DIR, args.out_dir, run_id)
     os.makedirs(out_path, exist_ok=True)
@@ -98,7 +104,7 @@ def main():
             )
             action_log = runner.run_loop()
         elif args.controller.startswith("rule_based_"):
-            method = args.controller.split("_")[-1] # "static" or "ratio"
+            method = args.controller.split("_")[-1]
             ctrl = RuleBasedController.from_config(
                 config_path=args.config,
                 method=method
@@ -120,12 +126,10 @@ def main():
             if act == 1 and first_promote is None:
                 first_promote = rec["step"]
         
-        # Check if full promote
         last_rec = action_log[-1]
         if last_rec.get("metrics", {}).get("traffic_weight_canary", 0) >= 0.99:
             outcome = "promote_full"
 
-    # Save action log
     action_log_path = os.path.join(out_path, "action_log.json")
     if args.dry_run:
         action_log = [{"dry_run": True}]
@@ -154,11 +158,52 @@ def main():
             "--end", datetime.now(timezone.utc).isoformat()
         ], check=False)
         
+    print("[6/6] Extracting Metadata and Ground Truth Log...")
+    if not args.dry_run:
+        try:
+            cmd = "kubectl get pods -n msdemo -l app=checkoutservice -o json"
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True)
+            pods = json.loads(res.stdout).get("items", [])
+            
+            canary_pod = None
+            for pod in pods:
+                containers = pod.get("spec", {}).get("containers", [])
+                for c in containers:
+                    for env in c.get("env", []):
+                        if env["name"] == "CHAOS_CONFIG" and run_id in env["value"]:
+                            canary_pod = pod
+                            break
+            
+            if canary_pod:
+                pod_name = canary_pod["metadata"]["name"]
+                node_name = canary_pod.get("spec", {}).get("nodeName", "unknown")
+                print(f"Found canary pod: {pod_name} on node {node_name}")
+                
+                # Extract ground_truth.jsonl
+                container_name = "server"
+                gt_path = os.path.join(out_path, "ground_truth.jsonl")
+                cp_cmd = f"kubectl exec -n msdemo {pod_name} -c {container_name} -- cat /var/log/chaos/ground_truth.jsonl > {gt_path}"
+                subprocess.run(cp_cmd, shell=True, check=False)
+                
+                # Save metadata.json
+                metadata = {
+                    "run_id": run_id,
+                    "node_name": node_name,
+                    "git_commit": get_git_commit(),
+                    "controller": args.controller,
+                    "scenario": scenario_name
+                }
+                with open(os.path.join(out_path, "metadata.json"), "w") as f:
+                    json.dump(metadata, f, indent=2)
+            else:
+                print("Warning: Canary pod not found for extraction.")
+        except Exception as e:
+            print(f"Failed to extract ground truth / metadata: {e}")
+
     print("[6/6] Final cleanup...")
     if not args.dry_run:
         subprocess.run(["python3", "scripts/chaos_reset.py"], check=False)
         
-    # Save timeline
     timeline = {
         "scenario": scenario_name,
         "controller": args.controller,

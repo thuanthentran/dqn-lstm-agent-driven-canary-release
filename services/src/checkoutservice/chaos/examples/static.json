@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "run_id": "test-static-01",
+  "seed": 42,
+  "resource_safe_mode": true,
+  "signals": {
+    "error": {
+      "pattern": "static",
+      "params": {
+        "value": 0.5
+      }
+    }
+  }
+}

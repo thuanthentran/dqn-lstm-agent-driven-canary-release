@@ -111,7 +111,8 @@ func main() {
 	// Load chaos configuration from environment variables.
 	// All CHAOS_* vars default to "disabled", so normal deployments
 	// are completely unaffected unless CHAOS_ENABLED=true is set.
-	chaosCfg := chaos.LoadFromEnv()
+	chaosMod, interceptor := chaos.Init()
+	defer chaosMod.Close()
 
 	svc := new(checkoutService)
 	mustMapEnv(&svc.shippingSvcAddr, "SHIPPING_SERVICE_ADDR")
@@ -141,11 +142,10 @@ func main() {
 			propagation.TraceContext{}, propagation.Baggage{}))
 
 	// Register the chaos interceptor in the chain.
-	// When CHAOS_ENABLED=false (default), chaosCfg.Apply is a no-op.
 	srv := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(
-			chaosCfg.UnaryServerInterceptor(),
+			interceptor,
 		),
 	)
 

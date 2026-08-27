@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "run_id": "test-linear-01",
+  "seed": 42,
+  "resource_safe_mode": true,
+  "signals": {
+    "mem": {
+      "pattern": "linear",
+      "params": {
+        "start_value": 0.0,
+        "growth_rate_per_sec": 0.5,
+        "ceiling": 200.0
+      }
+    }
+  }
+}

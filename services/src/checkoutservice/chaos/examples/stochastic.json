@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "run_id": "test-stochastic-01",
+  "seed": 42,
+  "resource_safe_mode": true,
+  "signals": {
+    "latency": {
+      "pattern": "stochastic",
+      "params": {
+        "min": 10.0,
+        "max": 200.0,
+        "dist": "lognormal",
+        "mean_shift": true
+      }
+    }
+  }
+}
