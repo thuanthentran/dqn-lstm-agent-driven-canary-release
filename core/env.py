@@ -18,6 +18,7 @@ SEQ_LEN = int(environ.get("SEQ_LEN", "30"))
 
 # Episode length
 MAX_STEPS_PER_EPISODE = 50
+EARLY_BONUS_SCALE = float(environ.get("EARLY_BONUS_SCALE", "0.1"))
 
 
 class CanaryEnv(gym.Env):
@@ -30,17 +31,17 @@ class CanaryEnv(gym.Env):
     Action: Discrete(3): 0=Hold, 1=Promote, 2=Rollback
     """
 
-    def __init__(self, seq_len: int = SEQ_LEN):
-        super().__init__()
+    def __init__(self, seq_len=30, num_features=15):
         self.seq_len = int(seq_len)
+        self.num_features = num_features
 
         # --- Dynamic channel list (15 features, 3GPP TS 28.552 aligned) ---
-        self.channel_keys = [
+        full_keys = [
             "cpu_n", "mem_n", "l_ratio_n", "e_ratio_n", "weight_n",
             "handover_n", "sinr_n", "rsrp_n", "prb_n", "harq_n", "ntn_gap_n",
             "isac_n", "pkt_loss_n", "jitter_n", "deploy_age_n",
         ]
-        self.num_features = len(self.channel_keys)
+        self.channel_keys = full_keys[:self.num_features]
 
         self.observation_space = gym.spaces.Box(
             low=0.0,
@@ -369,6 +370,8 @@ class CanaryEnv(gym.Env):
                 self.done = True
             else:
                 reward += 5.0
+                bonus = EARLY_BONUS_SCALE * max(0, MAX_STEPS_PER_EPISODE - self.step_count)
+                reward += bonus
                 self.weight = 0.0
                 self.done = True
 
@@ -378,6 +381,8 @@ class CanaryEnv(gym.Env):
             self.done = True
             if (norm["e_ratio_n"] <= 0.4) and (norm["l_ratio_n"] <= 0.4):
                 reward += 10.0
+                bonus = EARLY_BONUS_SCALE * max(0, MAX_STEPS_PER_EPISODE - self.step_count)
+                reward += bonus
             else:
                 reward -= 10.0
 

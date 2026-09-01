@@ -142,6 +142,26 @@ class TemporalTransformerBlock(nn.Module):
         return x, attn_weights  # attn_weights: (B, n_heads, T, T)
 
 
+class TemporalAggregationLayer(nn.Module):
+    """Cross-attention based temporal aggregation over sequence outputs.
+    
+    Uses a learnable query to attend over the sequence and produce a single
+    aggregated representation.
+    """
+    def __init__(self, d_model: int, n_heads: int = 1):
+        super().__init__()
+        self.agg_query = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+        self.cross_attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x: torch.Tensor):
+        B, T, d = x.shape
+        query = self.agg_query.expand(B, -1, -1)
+        out, weights = self.cross_attn(query, x, x, average_attn_weights=False)
+        out = out.squeeze(1)  # (B, d)
+        return self.norm(out), weights
+
+
 class TransformerFeatureExtractor(BaseFeaturesExtractor):
     """SB3-compatible Transformer feature extractor with explainable attention.
 
@@ -149,11 +169,11 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
         1. Feature Attention: cross-attention aggregating n_features features per timestep
         2. Positional Encoding: learnable position embeddings
         3. Temporal Transformer: self-attention over the time axis
-        4. Mean Pooling → features_dim output
+        4. Temporal Aggregation: cross-attention pooling → features_dim output
 
     Explainability attributes (updated every forward pass):
         - last_feature_attention:  (B, n_heads_feat, T, n_features)
-        - last_temporal_attention: (B, n_heads_temp, T, T)
+        - last_temporal_attention: (B, n_heads_temp, 1, T)  <- Attention to each timestep
     """
 
     def __init__(
@@ -182,6 +202,9 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
         # --- Temporal Transformer Encoder ---
         self.temporal_encoder = TemporalTransformerEncoder(d_model, n_heads, n_layers, dropout)
 
+        # --- Temporal Aggregation ---
+        self.temporal_aggregation = TemporalAggregationLayer(d_model, n_heads=1)
+
         # --- XAI storage (detached, moved to CPU after forward) ---
         self.last_feature_attention: Optional[torch.Tensor] = None
         self.last_temporal_attention: Optional[torch.Tensor] = None
@@ -200,14 +223,14 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
         x = x + self.pos_embed
 
         # 3. Temporal Transformer Encoder
-        x, temp_attn = self.temporal_encoder(x)  # x: (B,T,d), temp_attn: (B,nh,T,T)
+        x, temp_attn = self.temporal_encoder(x)  # x: (B, T, d_model), temp_attn: (B, nh, T, T)
 
-        # 4. Mean pooling over time
-        features = x.mean(dim=1)  # (B, d_model)
+        # 4. Temporal Aggregation
+        features, agg_attn = self.temporal_aggregation(x)  # features: (B, d_model), agg_attn: (B, nh, 1, T)
 
         # 5. Store attention maps for XAI (detach to avoid graph retention)
         self.last_feature_attention = feat_attn.detach().cpu()
-        self.last_temporal_attention = temp_attn.detach().cpu()
+        self.last_temporal_attention = agg_attn.detach().cpu()
 
         return features
 
@@ -217,7 +240,7 @@ class TransformerFeatureExtractor(BaseFeaturesExtractor):
         Returns:
             dict with keys:
                 - 'feature_attention':  np.ndarray (B, n_heads, T, n_features) or None
-                - 'temporal_attention': np.ndarray (B, n_heads, T, T) or None
+                - 'temporal_attention': np.ndarray (B, n_heads, 1, T) or None
         """
         fa = self.last_feature_attention.numpy() if self.last_feature_attention is not None else None
         ta = self.last_temporal_attention.numpy() if self.last_temporal_attention is not None else None
