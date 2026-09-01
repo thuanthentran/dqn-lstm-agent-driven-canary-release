@@ -20,3 +20,5 @@ Agent expose các REST API (ví dụ: HTTP POST từ Argo Rollouts `AnalysisTemp
 Để giúp các kỹ sư con người có thể theo dõi được "suy nghĩ" bên trong của Agent, hệ thống tích hợp sẵn một Dashboard chạy ngay trên port FastAPI.
 - **HTMLResponse**: Root path `/` trả về một giao diện HTML gọn nhẹ mô phỏng đồ thị.
 - **WebSockets**: Giao diện HTML này duy trì một kết nối WebSocket với backend (`main.py`). Bất cứ khi nào Agent nhận metrics mới và ra quyết định, nó đẩy (Push) một Broadcast Message qua WebSocket để biểu đồ trên Web UI nhảy dữ liệu ngay lập tức theo thời gian thực. Bằng cách này, người dùng không cần F5 trình duyệt vẫn thấy được sóng metrics và kết quả suy luận.
+
+## Trigger CI Builds
