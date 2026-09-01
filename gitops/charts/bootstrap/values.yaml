@@ -16,6 +16,7 @@ services:
   - name: checkoutservice
     chartPath: gitops/charts/universal-canary
     valueFile: ../../releases/checkoutservice-values.yaml
+    autoSync: false
 
   - name: currencyservice
     chartPath: gitops/charts/universal-canary

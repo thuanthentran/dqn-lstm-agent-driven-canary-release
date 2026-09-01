@@ -31,8 +31,10 @@ spec:
     server: 'https://kubernetes.default.svc'
     namespace: {{ $.Values.global.destinationNamespace | quote }}
   syncPolicy:
+  {{- if not (eq .autoSync false) }}
     automated:
       prune: true
       selfHeal: false
+  {{- end }}
 ---
 {{- end }}
