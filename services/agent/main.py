@@ -57,6 +57,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("ai-agent")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # --- 2. LOAD MÔ HÌNH TRANSFORMERPPO ---
 MODEL_READY = False
@@ -122,19 +123,19 @@ async def _build_history_from_prometheus(payload: WebhookPayload) -> Tuple[List[
     # Cập nhật query chuẩn Grafana Beyla
     tasks = [
         # e_canary: Error Ratio cho Canary
-        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m])) or vector(0)) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
-        _prom_query_range(f"(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\",classification=\"failure\"}}[1m])) or vector(0)) / clamp_min(sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"(sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",grpc_response_status!=\"0\"}}[1m])) or vector(0)) / clamp_min(sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
+        _prom_query_range(f"(sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",grpc_response_status!=\"0\"}}[1m])) or vector(0)) / clamp_min(sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\"}}[1m])), 0.001)", start_ts, end_ts, PROM_QUERY_STEP, empty_as_zero=True),
         # l_canary: P95 Latency
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(response_latency_ms_bucket{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m]))) / 1000", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"histogram_quantile(0.95, sum by (le) (rate(istio_request_duration_milliseconds_bucket{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\"}}[1m])))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
+        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         # CPU/Mem từ cAdvisor
         _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{c_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(rate(container_cpu_usage_seconds_total{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",container!=\"\",container!=\"POD\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP),
         _prom_query_range(f"avg(container_memory_working_set_bytes{{namespace=\"{ns}\",pod=~\".*{s_hash}.*\",container!=\"\",container!=\"POD\"}}) / 1048576", start_ts, end_ts, PROM_QUERY_STEP),
-        _prom_query_range(f"sum(rate(response_total{{namespace=\"{ns}\",pod=~\"{svc}.*\",direction=\"inbound\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
+        _prom_query_range(f"sum(rate(istio_requests_total{{namespace=\"{ns}\",pod=~\"{svc}.*\"}}[1m]))", start_ts, end_ts, PROM_QUERY_STEP)
     ]
 
     results = await asyncio.gather(*tasks)
