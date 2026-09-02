@@ -252,28 +252,9 @@ async def get_decision(payload: WebhookPayload):
         obs = np.array(obs_timesteps, dtype=np.float32)  # (30, 5)
         obs = np.expand_dims(obs, axis=0)  # (1, 30, 5)
 
-        # Áp dụng VecNormalize để chuẩn hóa dữ liệu theo phân phối lúc train
-        try:
-            from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-            import gymnasium as gym
+        # (Đã loại bỏ khối VecNormalize vì observation đã được chuẩn hóa sẵn 
+        # qua normalize_raw_metrics, và quá trình train dùng norm_obs=False)
 
-            # Khởi tạo DummyEnv chỉ để load VecNormalize
-            class DummyEnv(gym.Env):
-                def __init__(self):
-                    super().__init__()
-                    self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(SEQ_LENGTH, 5), dtype=np.float32)
-                    self.action_space = gym.spaces.Discrete(3)
-                def reset(self, seed=None, options=None):
-                    return np.zeros((SEQ_LENGTH, 5), dtype=np.float32), {}
-                def step(self, action):
-                    return np.zeros((SEQ_LENGTH, 5), dtype=np.float32), 0.0, False, False, {}
-
-            dummy_venv = DummyVecEnv([lambda: DummyEnv()])
-            vec_normalize = VecNormalize.load("models/vec_normalize.pkl", dummy_venv)
-            vec_normalize.training = False
-            obs = vec_normalize.normalize_obs(obs)
-        except Exception as e:
-            logger.error(f"Failed to normalize obs: {e}")
 
         # Inference bằng TransformerPPO (SB3)
         action_val, _states = model.predict(obs)
