@@ -61,7 +61,7 @@ spec:
             stableSubsetName: stable
             
       steps:
-      {{- if eq .Values.envNamespace "prod" }}
+      {{- if eq .Values.envNamespace "msdemo" }}
       # ===============================================
       # PROD NAMESPACE STEPS
       # ===============================================
