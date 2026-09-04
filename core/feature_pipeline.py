@@ -4,8 +4,8 @@ from typing import Dict, List
 EPSILON = 1e-6
 
 # Runtime-aware reference scales for normalization.
-CPU_REF = 0.02
-MEM_REF_MB = 128.0
+# CPU_REF và MEM_REF_MB đã bị xóa — CPU/RAM giờ normalize bằng ratio canary/stable
+# (giống error/latency), không còn normalize bằng absolute threshold cố định.
 RPS_REF = 50.0
 MAX_RATIO = 5.0
 MAX_ERR = 1.0
@@ -16,8 +16,10 @@ RAW_KEYS = [
     "e_stable",
     "l_canary",
     "l_stable",
-    "cpu",
-    "mem_mb",
+    "cpu_canary",
+    "cpu_stable",
+    "mem_canary_mb",
+    "mem_stable_mb",
     "rps",
 ]
 
@@ -27,8 +29,8 @@ STATE_KEYS = [
     "l_ratio_n",
     "e_gap_n",
     "l_gap_n",
-    "cpu_n",
-    "mem_n",
+    "cpu_ratio_n",
+    "mem_ratio_n",
     "rps_n",
 ]
 
@@ -48,14 +50,21 @@ def normalize_raw_metrics(raw: Dict[str, float]) -> Dict[str, float]:
     e_gap = max(0.0, e_canary - e_stable)
     l_gap_ratio = max(0.0, (l_canary - l_stable) / max(l_stable, EPSILON))
 
+    # CPU/RAM ratio: canary vs stable (dùng EPSILON thuần túy làm floor mẫu số,
+    # KHÔNG dùng hằng số "baseline hợp lý" như 0.04/12.0 — theo Nguyên tắc #1)
+    cpu_ratio = float(raw["cpu_canary"]) / max(float(raw["cpu_stable"]), EPSILON)
+    mem_ratio = float(raw["mem_canary_mb"]) / max(float(raw["mem_stable_mb"]), EPSILON)
+
     state = {
         "weight_n": _clip(float(raw["weight_pct"]) / 100.0, 0.0, 1.0),
         "e_ratio_n": _clip(e_ratio / MAX_RATIO, 0.0, 1.0),
         "l_ratio_n": _clip(l_ratio / MAX_RATIO, 0.0, 1.0),
         "e_gap_n": _clip(e_gap / MAX_ERR, 0.0, 1.0),
         "l_gap_n": _clip(l_gap_ratio / MAX_RATIO, 0.0, 1.0),
-        "cpu_n": _clip(float(raw["cpu"]) / CPU_REF, 0.0, 1.0),
-        "mem_n": _clip(float(raw["mem_mb"]) / MEM_REF_MB, 0.0, 1.0),
+        # cpu_ratio_n, mem_ratio_n thay cho cpu_n, mem_n:
+        # ratio=1.0 (canary==stable) => ratio_n = clip(1.0/MAX_RATIO(5.0), 0,1) = 0.2
+        "cpu_ratio_n": _clip(cpu_ratio / MAX_RATIO, 0.0, 1.0),
+        "mem_ratio_n": _clip(mem_ratio / MAX_RATIO, 0.0, 1.0),
         "rps_n": _clip(float(raw["rps"]) / RPS_REF, 0.0, 1.0),
     }
 

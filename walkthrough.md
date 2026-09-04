@@ -57,3 +57,19 @@ spec:
 > 1. Xây dựng Docker Image cho Agent và Operator (Chạy `docker build` và `docker push` vào registry).
 > 2. Cài đặt các file yaml trong `gitops/base/` vào K8s (`kubectl apply -f agent-crd.yaml`, v.v...).
 > 3. Cập nhật URL trong AnalysisTemplate của Argo Rollouts thành `http://canary-eval-agent-service.default.svc.cluster.local:8000/api/v1/decision`.
+
+---
+
+## 5. Tối ưu hóa RL Agent (New)
+Mô hình RL nội tại đã được tinh chỉnh với các cải tiến vượt bậc:
+
+### Temporal Aggregation Attention
+**File:** [core/model.py](file:///c:/Users/ASUS/Desktop/rl/core/model.py)
+
+Đã loại bỏ phép tính cào bằng `mean pooling` cũ. Bổ sung `TemporalAggregationLayer` dùng một *Learnable Query* kết hợp với cơ chế Cross-Attention để tự động tìm ra "thời điểm vàng" cần ra quyết định trong toàn bộ lịch sử (sequence). 
+Đồng thời cung cấp thêm explainability thông qua `last_aggregation_attention` giúp bạn trả lời câu hỏi: *Agent đã "nhìn" vào các timestep nào để chốt Promote hay Rollback?*.
+
+### Scenario-based Pareto Evaluation
+**File:** [training/offline_training.py](file:///c:/Users/ASUS/Desktop/rl/training/offline_training.py)
+
+Đã viết lại hoàn toàn cơ chế tính điểm FPR / FNR trong hàm `validate_model_locally`. Thay vì gom chung các ngoại lệ vào một rổ, giờ đây FPR/FNR và decision-latency được đếm, bóc tách và phân tích riêng biệt cho 5 kịch bản (Healthy, Resource Leak, Ticking Bomb, Critical Crash, Stable Equiv). Điều này giúp quan sát chuẩn xác "Đường cong Pareto" thực tế của mô hình (ví dụ: đánh đổi giữa độ trễ và tỷ lệ bắt được rò rỉ tài nguyên).
